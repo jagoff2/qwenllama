@@ -2346,16 +2346,28 @@ struct llama_model_qwen35 : public llama_model_base {
 
 
 struct llama_model_qwen4exp : public llama_model_base {
-    llama_model_qwen4exp(const struct llama_model_params & params) : llama_model_base(params) {}
+    llama_model_qwen4exp(const struct llama_model_params & params);
+    ~llama_model_qwen4exp() override;
 
     class llm_graph_input_qsa;
+
+    // --lazy-mode on-direct: pread() the lazy PLE table rows
+    // host-side instead of faulting them in through the mmap; see qwen4exp.cpp
+    struct ple_direct_reader;
+    std::unique_ptr<ple_direct_reader> ple_reader;
 
     void load_arch_hparams(llama_model_loader & ml) override;
     void load_arch_tensors(llama_model_loader & ml) override;
 
     struct graph : public llm_build_delta_net_base {
         graph(const llama_model & model, const llm_graph_params & params);
-    private:
+    protected:
+        // build-nothing constructor for graph_mtp: initialises the context without running
+        // the mainline body (whose trunk tensors a sidecar file does not carry)
+        struct mtp_tag {};
+        graph(const llama_model & model, const llm_graph_params & params, mtp_tag) :
+            llm_build_delta_net_base(params), model(model) {}
+
         // HC replaces every layer norm: residual is [n_embd, hc, n_tokens]
         ggml_tensor * build_hc_mix(
                     ggml_tensor * x,
@@ -2387,8 +2399,10 @@ struct llama_model_qwen4exp : public llama_model_base {
                     ggml_tensor * k_cur,
                     ggml_tensor * v_cur,
                     ggml_tensor * top_k,
+                    ggml_tensor * qsa_bias,
                           float   kq_scale,
-                            int   il);
+                            int   il,
+                           bool   gather = false);
 
         // the QSA cache layout inputs do not depend on the layer, only on its compress ratio,
         // so the layers sharing a ratio share one input set
@@ -2401,7 +2415,8 @@ struct llama_model_qwen4exp : public llama_model_base {
                     ggml_tensor * inp_pos,
                     ggml_tensor * kq_mask,
                             int * sections,
-                            int   il);
+                            int   il,
+                           bool   gather = false);
 
         ggml_tensor * build_layer_attn_linear(
              llm_graph_input_rs * inp,
@@ -2446,6 +2461,11 @@ struct llama_model_qwen4exp : public llama_model_base {
 
         const llama_model & model;
     };
+
+    struct graph_mtp : public graph {
+        graph_mtp(const llama_model & model, const llm_graph_params & params);
+    };
+
 
     std::unique_ptr<llm_graph_context> build_arch_graph(const llm_graph_params & params) const override;
 };
