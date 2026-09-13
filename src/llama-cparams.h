@@ -54,6 +54,16 @@ struct llama_cparams {
     bool kv_unified;
     bool pipeline_parallel;
 
+    // streamed MoE expert weights (see llama_context_params)
+    bool     moe_stream_enable     = false;
+    uint32_t moe_stream_slots      = 3;
+    uint32_t moe_stream_min_tokens = 1024;
+    uint32_t moe_stream_pin        = 1;
+    uint32_t moe_stream_budget_mib = 0;
+    int32_t  moe_stream_gpu_mode   = 0;   // see llama_moe_plan::place_mode
+    int32_t  moe_stream_arena_device = -1;
+    std::vector<float> moe_stream_split;  // byte weight per device for mode 2
+
     std::vector<bool> embeddings_layer_inp; // [n_layer()] extract input embeddings for layer
 
     enum llama_context_type ctx_type;

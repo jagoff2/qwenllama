@@ -571,6 +571,14 @@ struct common_params {
     bool ctx_shift         = false; // context shift on infinite text generation
     bool swa_full          = false; // use full-size SWA cache (https://github.com/ggml-org/llama.cpp/pull/13194#issuecomment-2868343055)
     bool kv_unified        = false; // enable unified KV cache
+    bool moe_stream        = false; // stream host-resident MoE expert weights during large prefills
+    int  moe_stream_slots  = 3;     // device arena slots per GPU
+    int  moe_stream_min_tokens = 1024; // smallest micro-batch that streams
+    int  moe_stream_pin    = 1;     // use a pinned host staging mirror
+    int  moe_stream_budget_mib = 0; // per-GPU VRAM ceiling for the arena, 0 = auto
+    int  moe_stream_gpu_mode   = 0; // arena placement: 0 layer, 1 primary, 2 weighted split
+    int  moe_stream_arena_device = -1; // placement mode 1 target device, -1 = auto
+    std::vector<float> moe_stream_split; // placement mode 2 byte weight per device, empty = equal
 
     bool input_prefix_bos  = false; // prefix BOS to user inputs, preceding input_prefix
     bool verbose_prompt    = false; // print prompt tokens before generation

@@ -4,6 +4,7 @@
 #include "llama-model.h"
 #include "llama-batch.h"
 #include "llama-cparams.h"
+#include "llama-moe-stream.h"
 #include "llama-sampler.h"
 
 #include "llama-kv-cache.h"
@@ -1493,6 +1494,7 @@ llm_graph_context::llm_graph_context(const llm_graph_params & params) :
     loras            (params.loras),
     mctx             (params.mctx),
     cross            (params.cross),
+    moe_stream       (params.moe_stream),
     samplers         (params.samplers),
     cb_func          (params.cb),
     res              (params.res),
@@ -2023,6 +2025,32 @@ ggml_tensor * llm_graph_context::build_moe_ffn(
     const int64_t n_tokens = cur->ne[1];
     const bool weight_before_ffn = arch == LLM_ARCH_LLAMA4; // for llama4, we apply the sigmoid-ed weights before the FFN
 
+    // streamed expert weights: replace this layer's expert tensors with the device arena image and
+    // bracket the mul_mat_id chain with the fences that order the async host->device fills. the arena
+    // mirrors the byte layout of the original tensors, so the graph shape is unchanged
+    llama_moe_stream_layer_bind ms_bind;
+    bool ms_on = false;
+
+    if (il >= 0 && !gate_up_exps && !gate_up_exps_b && !up_exps_s && !gate_exps_s && !down_exps_s &&
+            !up_exps_b && !gate_exps_b && !down_exps_b && type_op == LLM_FFN_SILU && !weight_before_ffn &&
+            loras && loras->empty() && llama_moe_stream_bind(moe_stream, il, ms_bind)) {
+        GGML_ASSERT(up_exps && gate_exps && down_exps);
+        GGML_ASSERT(ms_bind.arena[0]->ne[0] == up_exps->ne[0]   && ms_bind.arena[0]->ne[1] == up_exps->ne[1]   && ms_bind.arena[0]->ne[2] == up_exps->ne[2]);
+        GGML_ASSERT(ms_bind.arena[1]->ne[0] == gate_exps->ne[0] && ms_bind.arena[1]->ne[1] == gate_exps->ne[1] && ms_bind.arena[1]->ne[2] == gate_exps->ne[2]);
+        GGML_ASSERT(ms_bind.arena[2]->ne[0] == down_exps->ne[0] && ms_bind.arena[2]->ne[1] == down_exps->ne[1] && ms_bind.arena[2]->ne[2] == down_exps->ne[2]);
+
+        up_exps   = ms_bind.arena[0];
+        gate_exps = ms_bind.arena[1];
+        down_exps = ms_bind.arena[2];
+        ms_on     = true;
+
+        // node order in the graph is the execution order on the device stream, so this fence runs
+        // before every mul_mat_id that reads the slot
+        ggml_tensor * ms_pre = ggml_moe_stream_fence(ctx0, ms_bind.arena[0], nullptr, ms_bind.layer, 0,
+                ms_bind.slot, ms_bind.kick_slot, ms_bind.kick_layer);
+        ggml_build_forward_expand(gf, ms_pre);
+    }
+
     ggml_tensor * logits = nullptr;
 
     if (probs_in == nullptr) {
@@ -2307,6 +2335,16 @@ ggml_tensor * llm_graph_context::build_moe_ffn(
 
     experts = build_lora_mm_id(down_exps, cur, selected_experts, down_exps_s); // [n_embd, n_expert_used, n_tokens]
     cb(experts, "ffn_moe_down", il);
+
+    if (ms_on) {
+        // the down projection is the last reader of the arena slot: release it and kick the fill of
+        // the layer that will reuse it
+        // anchor the release on the arena view: it names the device that read the slot, which is not
+        // necessarily the device the activation lives on when the arena was placed elsewhere
+        ggml_tensor * ms_post = ggml_moe_stream_fence(ctx0, experts, ms_bind.arena[0], ms_bind.layer, 1,
+                ms_bind.slot, ms_bind.kick_slot, ms_bind.kick_layer);
+        ggml_build_forward_expand(gf, ms_post);
+    }
 
     if (down_exps_s) {
         cb(experts, "ffn_moe_down_scaled", il);

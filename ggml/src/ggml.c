@@ -1099,9 +1099,11 @@ static const char * GGML_OP_NAME[GGML_OP_COUNT] = {
     "OPT_STEP_SGD",
 
     "GLU",
+
+    "MOE_STREAM_FENCE",
 };
 
-static_assert(GGML_OP_COUNT == 101, "GGML_OP_COUNT != 101");
+static_assert(GGML_OP_COUNT == 102, "GGML_OP_COUNT != 102");
 
 static const char * GGML_OP_SYMBOL[GGML_OP_COUNT] = {
     "none",
@@ -1214,9 +1216,11 @@ static const char * GGML_OP_SYMBOL[GGML_OP_COUNT] = {
     "sgd(x)",
 
     "glu(x)",
+
+    "moe_stream_fence(a)",
 };
 
-static_assert(GGML_OP_COUNT == 101, "GGML_OP_COUNT != 101");
+static_assert(GGML_OP_COUNT == 102, "GGML_OP_COUNT != 102");
 
 static_assert(GGML_OP_POOL_COUNT == 2, "GGML_OP_POOL_COUNT != 2");
 
@@ -3389,6 +3393,34 @@ void ggml_mul_mat_set_hint(
 
     c ~= as[:,:,i] @ b[:,i%r,t], i = ids[e,t] for all e,t in ids
 */
+struct ggml_tensor * ggml_moe_stream_fence(
+        struct ggml_context * ctx,
+        struct ggml_tensor  * a,
+        struct ggml_tensor  * anchor,
+        int32_t               layer,
+        int32_t               phase,
+        int32_t               slot,
+        int32_t               kick_slot,
+        int32_t               kick_layer) {
+    GGML_ASSERT(a != NULL);
+    GGML_ASSERT(phase == 0 || phase == 1);
+    GGML_ASSERT(slot >= -1);
+
+    struct ggml_tensor * result = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 1);
+
+    result->op     = GGML_OP_MOE_STREAM_FENCE;
+    result->src[0] = a;
+    result->src[1] = anchor;
+
+    ggml_set_op_params_i32(result, 0, layer);
+    ggml_set_op_params_i32(result, 1, phase);
+    ggml_set_op_params_i32(result, 2, slot);
+    ggml_set_op_params_i32(result, 3, kick_slot);
+    ggml_set_op_params_i32(result, 4, kick_layer);
+
+    return result;
+}
+
 struct ggml_tensor * ggml_mul_mat_id(
         struct ggml_context * ctx,
         struct ggml_tensor  * as,

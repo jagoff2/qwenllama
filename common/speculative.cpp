@@ -2544,6 +2544,12 @@ common_speculative_init_result::common_speculative_init_result(
 
     if (spec_mtp) {
         cparams.ctx_type = LLAMA_CONTEXT_TYPE_MTP;
+        const char * ub = getenv("LLAMA_MTP_UBATCH");
+        const int limit = ub ? atoi(ub) : 0;
+        if (limit > 0) {
+            cparams.n_ubatch = std::min(cparams.n_ubatch, (uint32_t) limit);
+            LOG_INF("%s: MTP n_ubatch = %u (LLAMA_MTP_UBATCH)\n", __func__, cparams.n_ubatch);
+        }
     }
 
     // the draft context holds as many tokens per sequence as the target context
