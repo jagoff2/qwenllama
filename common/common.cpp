@@ -1748,6 +1748,15 @@ struct llama_context_params common_context_params_to_llama(const common_params &
     cparams.op_offload        = !params.no_op_offload;
     cparams.swa_full          = params.swa_full;
     cparams.kv_unified        = params.kv_unified;
+    cparams.moe_stream_enable     = params.moe_stream;
+    cparams.moe_stream_slots      = params.moe_stream_slots  < 0 ? 0 : (uint32_t) params.moe_stream_slots;
+    cparams.moe_stream_min_tokens = params.moe_stream_min_tokens < 0 ? 0 : (uint32_t) params.moe_stream_min_tokens;
+    cparams.moe_stream_pin        = params.moe_stream_pin    < 0 ? 0 : (uint32_t) params.moe_stream_pin;
+    cparams.moe_stream_budget_mib = params.moe_stream_budget_mib < 0 ? 0 : (uint32_t) params.moe_stream_budget_mib;
+    cparams.moe_stream_gpu_mode     = params.moe_stream_gpu_mode;
+    cparams.moe_stream_arena_device = params.moe_stream_arena_device;
+    cparams.moe_stream_split        = params.moe_stream_split.empty() ? nullptr : params.moe_stream_split.data();
+    cparams.n_moe_stream_split      = (uint32_t) params.moe_stream_split.size();
 
     cparams.type_k = params.cache_type_k;
     cparams.type_v = params.cache_type_v;

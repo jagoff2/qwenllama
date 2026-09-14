@@ -24,6 +24,9 @@ class llama_io_write_i;
 struct llama_memory_i;
 struct llama_memory_context_i;
 
+// streamed MoE expert weights
+struct llama_moe_stream;
+
 // stores copy of the memory in device buffer. used for fast state save/load
 struct llama_memory_buffer {
     int n_tensors = 0;
@@ -260,6 +263,10 @@ private:
             const llama_memory_context_i * mctx,
                           llm_graph_type   gtype) const;
 
+    // create the streamed expert engine on first use and return the plan for a micro-batch of
+    // n_tokens (nullptr => the baseline graph is built)
+    const llama_moe_stream * moe_stream_update(int64_t n_tokens);
+
     llm_graph_cb graph_get_cb() const;
 
     // disable auto fused ops (Flash Attention, Gated Delta Net) whose op lands on a device
@@ -344,6 +351,14 @@ private:
     ggml_backend_sched_ptr sched;
 
     bool sched_need_reserve = true;
+
+    // streamed MoE expert weights: the engine is created lazily (once the KV cache already owns its
+    // VRAM) and moe_stream_cur is the per-ubatch decision handed to graph_params()
+    llama_moe_stream * moe_stream        = nullptr;
+    bool               moe_stream_failed = false;
+    bool               moe_stream_need_reserve = true;
+
+    const llama_moe_stream * moe_stream_cur = nullptr;
 
     ggml_backend_t backend_cpu = nullptr;
     std::vector<ggml_backend_ptr> backends;

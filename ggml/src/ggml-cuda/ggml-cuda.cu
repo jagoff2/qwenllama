@@ -28,6 +28,7 @@
 #include "ggml-cuda/fwht.cuh"
 #include "ggml-cuda/getrows.cuh"
 #include "ggml-cuda/im2col.cuh"
+#include "ggml-cuda/moe-stream.cuh"
 #include "ggml-cuda/mmf.cuh"
 #include "ggml-cuda/mmq.cuh"
 #include "ggml-cuda/mmvf.cuh"
@@ -2251,6 +2252,9 @@ static bool ggml_cuda_compute_forward(ggml_backend_cuda_context & ctx, struct gg
         case GGML_OP_MUL_MAT:
             ggml_cuda_mul_mat(ctx, dst->src[0], dst->src[1], dst);
             break;
+        case GGML_OP_MOE_STREAM_FENCE:
+            ggml_cuda_op_moe_stream_fence(ctx, dst);
+            break;
         case GGML_OP_MUL_MAT_ID:
             ggml_cuda_mul_mat_id(ctx, dst);
             break;
@@ -2557,6 +2561,12 @@ static bool ggml_cuda_graph_check_compability(ggml_cgraph * cgraph) {
 
         if (ggml_cuda_is_view_or_noop(node)) {
             continue;
+        }
+
+        // streamed expert fences order work against host-driven async fills, which a captured
+        // graph cannot express
+        if (node->op == GGML_OP_MOE_STREAM_FENCE) {
+            use_cuda_graph = false;
         }
 
         // [TAG_MUL_MAT_ID_CUDA_GRAPHS]
@@ -5112,6 +5122,18 @@ static bool ggml_backend_cuda_device_supports_op(ggml_backend_dev_t dev, const g
                     return false;
             }
             break;
+        case GGML_OP_MOE_STREAM_FENCE:
+            {
+                // ordering point for the streamed expert arena. it moves no data but it must execute on
+                // the device that owns the arena slot. src[1] is the arena view when the builder supplied
+                // one; src[0] is often an in-graph node that has no buffer at scheduling time, so it
+                // must not be dereferenced here.
+                const struct ggml_tensor * anchor = op->src[1] ? op->src[1] : op->src[0];
+                if (anchor == nullptr) {
+                    return false;
+                }
+                return anchor->buffer == nullptr || ggml_backend_buft_is_cuda(anchor->buffer->buft);
+            }
         case GGML_OP_MUL_MAT:
         case GGML_OP_MUL_MAT_ID:
             {
@@ -5686,6 +5708,24 @@ static void * ggml_backend_cuda_reg_get_proc_address(ggml_backend_reg_t reg, con
     }
     if (strcmp(name, "ggml_backend_get_features") == 0) {
         return (void *)ggml_backend_cuda_get_features;
+    }
+    if (strcmp(name, GGML_MOE_STREAM_PROC_SETUP) == 0) {
+        return (void *)ggml_cuda_moe_stream_setup_impl;
+    }
+    if (strcmp(name, GGML_MOE_STREAM_PROC_TEARDOWN) == 0) {
+        return (void *)ggml_cuda_moe_stream_teardown_impl;
+    }
+    if (strcmp(name, GGML_MOE_STREAM_PROC_STATS) == 0) {
+        return (void *)ggml_cuda_moe_stream_stats_impl;
+    }
+    if (strcmp(name, GGML_MOE_STREAM_PROC_RESET) == 0) {
+        return (void *)ggml_cuda_moe_stream_reset_impl;
+    }
+    if (strcmp(name, GGML_MOE_STREAM_PROC_ACTIVE) == 0) {
+        return (void *)ggml_cuda_moe_stream_active_impl;
+    }
+    if (strcmp(name, GGML_MOE_STREAM_PROC_BEGIN) == 0) {
+        return (void *)ggml_cuda_moe_stream_begin_impl;
     }
     return nullptr;
 }

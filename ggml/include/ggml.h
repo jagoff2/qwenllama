@@ -601,6 +601,10 @@ extern "C" {
 
         GGML_OP_GLU,
 
+        // Streamed MoE expert prefill: in-graph ordering point for the device-side expert
+        // arena. Carries no data; see ggml-moe-stream.h for the engine contract.
+        GGML_OP_MOE_STREAM_FENCE,
+
         GGML_OP_COUNT,
     };
 
@@ -1497,6 +1501,21 @@ extern "C" {
             enum ggml_op_hint    hint);
 
     // indirect matrix multiplication
+    // Streaming MoE expert prefill ordering point. `a` is the device arena image bound to this
+    // layer; the op moves no data, it only orders the engine's async fills against the graph.
+    // phase: 0 = before the layer's mul_mat_id chain, 1 = after it.
+    // The anchor decides which device executes the fence: pass a tensor whose buffer lives on the
+    // device that owns the arena slot (the arena view). NULL uses a as the anchor.
+    GGML_API struct ggml_tensor * ggml_moe_stream_fence(
+            struct ggml_context * ctx,
+            struct ggml_tensor  * a,
+            struct ggml_tensor  * anchor,
+            int32_t               layer,
+            int32_t               phase,
+            int32_t               slot,
+            int32_t               kick_slot,
+            int32_t               kick_layer);
+
     GGML_API struct ggml_tensor * ggml_mul_mat_id(
             struct ggml_context * ctx,
             struct ggml_tensor  * as,

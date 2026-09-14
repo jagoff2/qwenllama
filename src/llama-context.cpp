@@ -9,6 +9,7 @@
 #include "llama-memory.h"
 #include "llama-mmap.h"
 #include "llama-model.h"
+#include "llama-moe-stream.h"
 #include "llama-ext.h"
 #include "llama-sampler.h"
 #include "llama.h"
@@ -272,6 +273,18 @@ llama_context::llama_context(
     cparams.op_offload = params.op_offload;
     cparams.kv_unified = params.kv_unified;
 
+    cparams.moe_stream_enable     = params.moe_stream_enable && cparams.ctx_type != LLAMA_CONTEXT_TYPE_MTP;
+    cparams.moe_stream_slots      = params.moe_stream_slots      == 0 ? 3 : params.moe_stream_slots;
+    cparams.moe_stream_min_tokens = params.moe_stream_min_tokens == 0 ? 1 : params.moe_stream_min_tokens;
+    cparams.moe_stream_pin        = params.moe_stream_pin;
+    cparams.moe_stream_budget_mib = params.moe_stream_budget_mib;
+    cparams.moe_stream_gpu_mode     = params.moe_stream_gpu_mode;
+    cparams.moe_stream_arena_device = params.moe_stream_arena_device;
+    if (params.moe_stream_split != nullptr && params.n_moe_stream_split > 0) {
+        cparams.moe_stream_split.assign(params.moe_stream_split,
+                                        params.moe_stream_split + params.n_moe_stream_split);
+    }
+
     // initialized later
     cparams.pipeline_parallel = false;
 
@@ -482,6 +495,10 @@ llama_context::~llama_context() {
     // wait for any pending asynchronous copies into the output buffers before they are freed
     synchronize();
 
+    // the expert arena buffers are referenced by the last graph, so tear the engine down first
+    llama_moe_stream_destroy(moe_stream);
+    moe_stream = nullptr;
+
     // when training, ggml_opt allocates extra buffers through the scheduler, so the sizes no longer match the expectation
     if (!model.hparams.no_alloc && !opt_ctx) {
         for (size_t i = 0; i < backend_ptrs.size(); ++i) {
@@ -585,6 +602,7 @@ void llama_context::sched_reserve() {
     }
 
     sched_need_reserve = false;
+    moe_stream_need_reserve = true;
 
     LLAMA_LOG_INFO("%s: reserving ...\n", __func__);
 
@@ -1333,11 +1351,76 @@ bool llama_context::set_adapter_cvec(
     return res;
 }
 
+const llama_moe_stream * llama_context::moe_stream_update(const int64_t n_tokens) {
+    if (moe_stream == nullptr && !moe_stream_failed && cparams.moe_stream_enable
+            && n_tokens >= (int64_t) cparams.moe_stream_min_tokens) {
+        const uint32_t n_layer = model.hparams.n_layer();
+
+        std::vector<ggml_backend_dev_t> dev_of_layer(n_layer, nullptr);
+        for (uint32_t il = 0; il < n_layer; ++il) {
+            ggml_backend_dev_t dev = model.dev_layer(il);
+            if (dev && ggml_backend_dev_type(dev) == GGML_BACKEND_DEVICE_TYPE_GPU) {
+                dev_of_layer[il] = dev;
+            }
+        }
+
+        llama_moe_stream_params sp;
+        sp.enable     = true;
+        sp.n_slots    = (int) cparams.moe_stream_slots;
+        sp.min_tokens = cparams.moe_stream_min_tokens;
+        sp.pin_host   = (int) cparams.moe_stream_pin;
+        sp.set_budget_mib(cparams.moe_stream_budget_mib);
+        sp.place_mode   = cparams.moe_stream_gpu_mode;
+        sp.place_device = cparams.moe_stream_arena_device;
+        sp.place_w      = cparams.moe_stream_split;
+
+        moe_stream = llama_moe_stream_create(model, dev_of_layer, sp);
+        if (moe_stream == nullptr) {
+            moe_stream_failed = true;
+            LLAMA_LOG_WARN("%s: streamed experts are not available, expert GEMMs stay on the baseline path\n",
+                    __func__);
+        }
+    }
+
+    return llama_moe_stream_select(moe_stream, n_tokens);
+}
+
 llm_graph_result * llama_context::process_ubatch(const llama_ubatch & ubatch, llm_graph_type gtype, llama_memory_context_i * mctx, ggml_status & ret) {
     if (mctx && !mctx->apply()) {
         LLAMA_LOG_ERROR("%s: failed to apply memory context\n", __func__);
         ret = GGML_STATUS_FAILED;
         return nullptr;
+    }
+
+    // Select before graph construction. Reserve graphs may contain fences but never execute them.
+    moe_stream_cur = moe_stream_update(ubatch.n_tokens);
+
+    if (moe_stream_cur && moe_stream_need_reserve) {
+        // Startup reserves the host-expert graph. Device experts change splits and tensor lifetimes.
+        ggml_backend_sched_synchronize(sched.get());
+        auto mctx_full = memory ? memory->init_full() : nullptr;
+        const uint32_t n_tokens = std::min(cparams.n_ctx, cparams.n_ubatch);
+        const uint32_t n_outputs_pp = std::min(n_tokens, cparams.n_outputs_max);
+
+        LLAMA_LOG_INFO("%s: reserving streamed full-memory graph: n_ctx = %u, n_tokens = %u, n_seqs = %u, n_outputs = %u\n",
+                __func__, cparams.n_ctx, n_tokens, cparams.n_seq_max, n_outputs_pp);
+
+        if ((memory && !mctx_full) ||
+                !graph_reserve(n_tokens, cparams.n_seq_max, n_outputs_pp, mctx_full.get())) {
+            moe_stream_cur = nullptr;
+            LLAMA_LOG_ERROR("%s: streamed full-memory compute reservation failed; current micro-batch was not started\n", __func__);
+            ret = GGML_STATUS_ALLOC_FAILED;
+            return nullptr;
+        }
+
+        moe_stream_need_reserve = false;
+        for (size_t i = 0; i < backend_ptrs.size(); ++i) {
+            backend_buf_exp_size[i] = ggml_backend_sched_get_buffer_size(sched.get(), backend_ptrs[i]);
+            if (backend_buf_exp_size[i] > 1) {
+                LLAMA_LOG_INFO("%s: %10s streamed compute buffer size = %8.2f MiB\n", __func__,
+                        ggml_backend_buft_name(backend_buft[i]), backend_buf_exp_size[i] / 1024.0 / 1024.0);
+            }
+        }
     }
 
     auto * res = gf_res_prev.get();
@@ -1346,6 +1429,9 @@ llm_graph_result * llama_context::process_ubatch(const llama_ubatch & ubatch, ll
     // the new graph parameters
     // in order to correctly reuse a graph, it's full topology has to be uniquely determined by these parameters
     const auto gparams = graph_params(res, ubatch, mctx, gtype);
+
+    // the decision now lives in gparams; leave every other graph builder on the baseline path
+    moe_stream_cur = nullptr;
 
     if (!graph_reuse_disable && res->can_reuse(gparams)) {
         //LLAMA_LOG_DEBUG("%s: reusing previous graph\n", __func__);
@@ -1393,7 +1479,15 @@ llm_graph_result * llama_context::process_ubatch(const llama_ubatch & ubatch, ll
         //LLAMA_LOG_INFO("graph set inputs time: %.3f ms\n", (ggml_time_us() - t_start_us)/1000.0);
     }
 
+    const int64_t t_stream_us = ggml_time_us();
+
+    // prime the expert ring for this micro-batch (no-op when the graph is not streamed)
+    llama_moe_stream_arm(moe_stream, ubatch.n_tokens);
+
     const auto status = graph_compute(res->get_gf(), ubatch.n_tokens > 1);
+
+    llama_moe_stream_report(moe_stream, ubatch.n_tokens, (ggml_time_us() - t_stream_us) / 1000.0);
+
     if (status != GGML_STATUS_SUCCESS) {
         LLAMA_LOG_ERROR("%s: failed to compute graph, compute status: %d\n", __func__, status);
         ret = status;
@@ -2484,6 +2578,7 @@ llm_graph_params llama_context::graph_params(
         /*.loras       =*/ loras.get(),
         /*.mctx        =*/ mctx,
         /*.cross       =*/ &cross,
+        /*.moe_stream  =*/ moe_stream_cur,
         /*.samplers    =*/ sampling.samplers,
         /*.n_outputs   =*/ n_outputs,
         /*.cb          =*/ graph_get_cb(),
@@ -3654,6 +3749,15 @@ llama_context_params llama_context_default_params() {
         /*.sampler                     =*/ nullptr,
         /*.n_sampler                   =*/ 0,
         /*.ctx_other                   =*/ nullptr,
+        /*.moe_stream_enable           =*/ false,
+        /*.moe_stream_slots            =*/ 3,
+        /*.moe_stream_min_tokens       =*/ 1024,
+        /*.moe_stream_pin              =*/ 1,
+        /*.moe_stream_budget_mib       =*/ 0,
+        /*.moe_stream_gpu_mode         =*/ 0,
+        /*.moe_stream_arena_device     =*/ -1,
+        /*.moe_stream_split            =*/ nullptr,
+        /*.n_moe_stream_split          =*/ 0,
     };
 
     return result;

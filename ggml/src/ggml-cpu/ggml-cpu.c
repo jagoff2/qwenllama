@@ -1862,6 +1862,12 @@ static void ggml_compute_forward(struct ggml_compute_params * params, struct ggm
             {
                 ggml_compute_forward_mul_mat(params, tensor);
             } break;
+        case GGML_OP_MOE_STREAM_FENCE:
+            {
+                // device-side expert streaming ordering point: meaningless on the CPU, and the CPU
+                // backend reports the op as unsupported, so reaching here is a graph wiring bug
+                GGML_ABORT("fatal error: moe_stream_fence is a CUDA-only op");
+            } break;
         case GGML_OP_MUL_MAT_ID:
             {
                 ggml_compute_forward_mul_mat_id(params, tensor);
