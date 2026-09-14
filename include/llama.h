@@ -417,6 +417,21 @@ extern "C" {
         // a source/target/parent context
         // can be utilized in various ways, for example by sharing results or llama_memory between 2 contexts
         struct llama_context * ctx_other;
+
+        // [EXPERIMENTAL] streamed MoE expert weights
+        // when expert tensors are host-resident, the expert GEMMs normally run on the CPU. with this
+        // enabled, large micro-batches stream whole expert-layer images through a small ring of device
+        // arena slots so the GEMMs run on the GPU and the PCIe transfer overlaps the compute.
+        // every field is inert while moe_stream_enable is false (the baseline path).
+        bool     moe_stream_enable;       // opt-in: stream host-resident expert weights on device
+        uint32_t moe_stream_slots;        // arena slots per device (>= 2 overlaps transfer with compute)
+        uint32_t moe_stream_min_tokens;   // stream micro-batches of at least this many tokens
+        uint32_t moe_stream_pin;          // stage host->device copies through pinned host memory
+        uint32_t moe_stream_budget_mib;   // per-device VRAM ceiling for the arena (0 = auto)
+        int32_t  moe_stream_gpu_mode;     // 0 = arena on the owning device, 1 = one device, 2 = weighted split
+        int32_t  moe_stream_arena_device; // mode 1 target device; -1 = device owning most streamed bytes
+        const float * moe_stream_split;   // mode 2 byte weight per CUDA device, borrowed, may be NULL
+        uint32_t n_moe_stream_split;      // mode 2 number of weights (0 = equal)
     };
 
     struct llama_model_tensor_override {

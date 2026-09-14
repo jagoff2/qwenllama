@@ -93,6 +93,7 @@ struct llama_cross {
 };
 
 struct llm_graph_params;
+struct llama_moe_stream;
 
 //
 // llm_graph_input
@@ -787,6 +788,9 @@ struct llm_graph_params {
     const llama_memory_context_i * mctx;
     const llama_cross            * cross;
 
+    // streamed MoE expert weights for this micro-batch; nullptr builds the baseline graph
+    const llama_moe_stream       * moe_stream;
+
     std::map<llama_seq_id, llama_sampler *> samplers;
 
     static bool samplers_equal(
@@ -880,7 +884,10 @@ struct llm_graph_params {
             gtype == other.gtype &&
             cvec  == other.cvec  &&
             loras == other.loras &&
-            cross == other.cross;
+            cross == other.cross &&
+            // a streamed graph contains fence nodes that order the async expert fills: it is not
+            // interchangeable with the baseline graph for the same ubatch shape
+            moe_stream == other.moe_stream;
     }
 };
 
@@ -1026,6 +1033,9 @@ struct llm_graph_context {
     const llama_adapter_loras    * loras;
     const llama_memory_context_i * mctx;
     const llama_cross            * cross;
+
+    // streamed MoE expert weights for this micro-batch; nullptr builds the baseline graph
+    const llama_moe_stream       * moe_stream;
 
     std::map<llama_seq_id, llama_sampler *> samplers;
 

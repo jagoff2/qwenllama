@@ -1726,6 +1726,92 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
         }
     ).set_env("LLAMA_ARG_KV_UNIFIED").set_examples({LLAMA_EXAMPLE_SERVER, LLAMA_EXAMPLE_PERPLEXITY, LLAMA_EXAMPLE_BATCHED, LLAMA_EXAMPLE_BENCH, LLAMA_EXAMPLE_PARALLEL}));
     add_opt(common_arg(
+        {"--fn-stream-experts"},
+        {"--no-fn-stream-experts"},
+        "stream host-resident MoE expert weights through device arena slots so the expert GEMMs run on\n"
+        "the GPU during large prefills instead of on the CPU (default: disabled)",
+        [](common_params & params, bool value) {
+            params.moe_stream = value;
+        }
+    ).set_env("LLAMA_ARG_QWEN4EXP_STREAM").set_examples({LLAMA_EXAMPLE_SERVER, LLAMA_EXAMPLE_PERPLEXITY, LLAMA_EXAMPLE_BENCH}));
+    add_opt(common_arg(
+        {"--fn-stream-slots"}, "N",
+        string_format("expert arena slots per GPU, >= 2 overlaps the host->device fill with compute\n"
+            "(default: %d)", params.moe_stream_slots),
+        [](common_params & params, int value) {
+            params.moe_stream_slots = value;
+        }
+    ).set_env("LLAMA_ARG_QWEN4EXP_STREAM_SLOTS").set_examples({LLAMA_EXAMPLE_SERVER, LLAMA_EXAMPLE_BENCH}));
+    add_opt(common_arg(
+        {"--fn-stream-min-tokens"}, "N",
+        string_format("only micro-batches with at least N tokens use streamed experts; smaller batches\n"
+            "keep the resident experts (default: %d)", params.moe_stream_min_tokens),
+        [](common_params & params, int value) {
+            params.moe_stream_min_tokens = value;
+        }
+    ).set_env("LLAMA_ARG_QWEN4EXP_STREAM_MIN_TOKENS").set_examples({LLAMA_EXAMPLE_SERVER, LLAMA_EXAMPLE_BENCH}));
+    add_opt(common_arg(
+        {"--fn-stream-pin"},
+        {"--no-fn-stream-pin"},
+        "stage the expert host->device copies through a pinned host mirror, chunked so the stage copy\n"
+        "and the PCIe DMA overlap (default: enabled)",
+        [](common_params & params, bool value) {
+            params.moe_stream_pin = value ? 1 : 0;
+        }
+    ).set_env("LLAMA_ARG_QWEN4EXP_STREAM_PIN").set_examples({LLAMA_EXAMPLE_SERVER, LLAMA_EXAMPLE_BENCH}));
+    add_opt(common_arg(
+        {"--fn-stream-budget-mib"}, "N",
+        string_format("VRAM ceiling per GPU for the expert arena, 0 measures the free memory at startup\n"
+            "(default: %d)", params.moe_stream_budget_mib),
+        [](common_params & params, int value) {
+            params.moe_stream_budget_mib = value;
+        }
+    ).set_env("LLAMA_ARG_QWEN4EXP_STREAM_BUDGET_MIB").set_examples({LLAMA_EXAMPLE_SERVER, LLAMA_EXAMPLE_BENCH}));
+    add_opt(common_arg(
+        {"--fn-stream-gpu-mode"}, "{layer,primary,split}",
+        "which device holds the expert arena:\n"
+        "- layer (default): the device that owns the layer\n"
+        "- primary: one device holds every arena, so a single host link carries all expert traffic\n"
+        "- split: distribute the streamed bytes over devices by --fn-stream-gpu-split weight\n"
+        "primary and split may place an arena on a non-owning device; the expert GEMM then runs on the\n"
+        "arena device and the activations cross the link instead of the layer image",
+        [](common_params & params, const std::string & value) {
+            if (value == "layer") {
+                params.moe_stream_gpu_mode = 0;
+            } else if (value == "primary") {
+                params.moe_stream_gpu_mode = 1;
+            } else if (value == "split") {
+                params.moe_stream_gpu_mode = 2;
+            } else {
+                throw std::invalid_argument("invalid value");
+            }
+        }
+    ).set_env("LLAMA_ARG_QWEN4EXP_STREAM_GPU_MODE").set_examples({LLAMA_EXAMPLE_SERVER, LLAMA_EXAMPLE_BENCH}));
+    add_opt(common_arg(
+        {"--fn-stream-arena-device"}, "N",
+        "target device for --fn-stream-gpu-mode primary, -1 picks the device carrying the most\n"
+        "streamed bytes\n"
+        "(default: -1)",
+        [](common_params & params, int value) {
+            params.moe_stream_arena_device = value;
+        }
+    ).set_env("LLAMA_ARG_QWEN4EXP_STREAM_ARENA_DEVICE").set_examples({LLAMA_EXAMPLE_SERVER, LLAMA_EXAMPLE_BENCH}));
+    add_opt(common_arg(
+        {"--fn-stream-gpu-split"}, "W0,W1,...",
+        "byte weight per CUDA device for --fn-stream-gpu-mode split, e.g. 4,1 puts four times the\n"
+        "streamed bytes on device 0; 0 excludes a device\n"
+        "(default: equal)",
+        [](common_params & params, const std::string & value) {
+            params.moe_stream_split.clear();
+            for (const auto & tok : string_split<std::string>(value, ',')) {
+                params.moe_stream_split.push_back(std::stof(tok));
+            }
+            if (params.moe_stream_split.empty()) {
+                throw std::invalid_argument("expected at least one weight");
+            }
+        }
+    ).set_env("LLAMA_ARG_QWEN4EXP_STREAM_GPU_SPLIT").set_examples({LLAMA_EXAMPLE_SERVER, LLAMA_EXAMPLE_BENCH}));
+    add_opt(common_arg(
         {"--cache-idle-slots"},
         {"--no-cache-idle-slots"},
         "save idle slots to the prompt cache on new task, and clear them when using unified KV (default: enabled, requires cache-ram)",
