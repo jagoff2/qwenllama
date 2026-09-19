@@ -268,6 +268,13 @@ struct result_prompt_progress {
     json to_json() const;
 };
 
+// Construct a Responses API "function_call" output item from a Chat Completions tool call.
+// Tools that the Responses -> Chat Completions conversion flattened with a namespace
+// (server_chat_encode_namespace_tool_name) are split back into separate "namespace" and "name"
+// fields, so Responses clients (Codex, MCP) never observe the flat name. Plain tools keep a plain
+// "name" and no "namespace" field.
+json server_task_responses_function_call_item(const common_chat_tool_call & tool_call, const std::string & status, const std::string & arguments);
+
 struct server_task_result {
     int id           = -1;
     int id_slot      = -1;

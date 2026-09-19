@@ -525,6 +525,27 @@ json server_task_result_cmpl_final::to_json_oaicompat_chat_stream() {
     return deltas;
 }
 
+json server_task_responses_function_call_item(const common_chat_tool_call & tool_call, const std::string & status, const std::string & arguments) {
+    std::string tool_namespace;
+    std::string tool_name;
+
+    json item = {
+        {"id",        "fc_" + tool_call.id},
+        {"type",      "function_call"},
+        {"status",    status},
+        {"arguments", arguments},
+        {"call_id",   "call_" + tool_call.id},
+        {"name",      tool_call.name},
+    };
+
+    if (server_chat_decode_namespace_tool_name(tool_call.name, tool_namespace, tool_name)) {
+        item["name"]      = tool_name;
+        item["namespace"] = tool_namespace;
+    }
+
+    return item;
+}
+
 json server_task_result_cmpl_final::to_json_oaicompat_resp() {
     common_chat_msg msg;
     if (!oaicompat_msg.empty()) {
@@ -566,14 +587,7 @@ json server_task_result_cmpl_final::to_json_oaicompat_resp() {
     }
 
     for (const common_chat_tool_call & tool_call : oaicompat_msg.tool_calls) {
-        output.push_back(json {
-            {"id",        "fc_" + tool_call.id},
-            {"type",      "function_call"},
-            {"status",    "completed"},
-            {"arguments", tool_call.arguments},
-            {"call_id",   "call_" + tool_call.id},
-            {"name",      tool_call.name},
-        });
+        output.push_back(server_task_responses_function_call_item(tool_call, "completed", tool_call.arguments));
     }
 
     std::time_t t = std::time(0);
@@ -666,14 +680,7 @@ json server_task_result_cmpl_final::to_json_oaicompat_resp_stream() {
     }
 
     for (const common_chat_tool_call & tool_call : oaicompat_msg.tool_calls) {
-        const json output_item = {
-            {"id",        "fc_" + tool_call.id},
-            {"type",      "function_call"},
-            {"status",    "completed"},
-            {"arguments", tool_call.arguments},
-            {"call_id",   "call_" + tool_call.id},
-            {"name",      tool_call.name}
-        };
+        const json output_item = server_task_responses_function_call_item(tool_call, "completed", tool_call.arguments);
         server_sent_events.push_back(json {
             {"event", "response.output_item.done"},
             {"data", json {
@@ -1275,14 +1282,8 @@ json server_task_result_cmpl_partial::to_json_oaicompat_resp() {
                 {"event", "response.output_item.added"},
                 {"data", json {
                     {"type",  "response.output_item.added"},
-                    {"item", json {
-                        {"id",        "fc_" + diff.tool_call_delta.id},
-                        {"arguments", ""},
-                        {"call_id",   "call_" + diff.tool_call_delta.id},
-                        {"name",      diff.tool_call_delta.name},
-                        {"type",      "function_call"},
-                        {"status",    "in_progress"},
-                    }},
+                    // the item starts with empty arguments, response.function_call_arguments.delta carries them
+                    {"item", server_task_responses_function_call_item(diff.tool_call_delta, "in_progress", "")},
                 }},
             });
             oai_resp_fc_id = diff.tool_call_delta.id;

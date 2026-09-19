@@ -1500,6 +1500,21 @@ curl http://localhost:8080/v1/responses \
 
 This endpoint works by converting Responses request into Chat Completions request.
 
+Grouped tools are supported. A Responses `namespace` tool (Codex Multi-Agent V1 tools, MCP server
+tools) is expanded into ordinary Chat Completions functions. The flat name is the namespace and the
+tool name joined by one `.`, where a literal `.` inside either part is escaped as `..`:
+
+```text
+(multi_agent_v1, spawn_agent) -> multi_agent_v1.spawn_agent
+(foo.bar,        baz.qux)      -> foo..bar.baz..qux
+```
+
+Replayed `function_call` input items that carry a `namespace` are encoded the same way. A flat name
+that this encoding could have produced is split back into separate `namespace` and `name` fields in
+every Responses output item, so a Responses client never sees the flat name. Plain tools such as
+`exec_command` are left untouched, and tool types with no Chat Completions equivalent are still
+skipped with a warning.
+
 
 ### POST `/v1/embeddings`: OpenAI-compatible embeddings API
 

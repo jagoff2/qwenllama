@@ -1,4 +1,5 @@
 import pytest
+from pathlib import Path
 from openai import OpenAI
 from utils import *
 
@@ -8,6 +9,195 @@ server: ServerProcess
 def create_server():
     global server
     server = ServerPreset.tinyllama2()
+
+
+@pytest.mark.parametrize("endpoint", ["/v1/responses", "/v1/responses/input_tokens"])
+def test_responses_function_call_output_content_array(endpoint):
+    server.jinja = True
+    server.start()
+    res = server.make_request("POST", endpoint, data={
+        "input": [
+            {"role": "user", "content": "Describe the image"},
+            {"type": "function_call", "call_id": "call_image", "name": "view_image", "arguments": "{}"},
+            {"type": "function_call_output", "call_id": "call_image", "output": [
+                {"type": "output_text", "text": "Viewed Image"},
+                {"type": "input_text", "text": "\nSecond block"},
+                {"type": "text", "text": "\nThird block"},
+                {"type": "input_file", "file_id": "file_unsupported"},
+                {"type": "input_image", "image_url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg=="},
+                None,
+                {"type": "output_text", "text": None},
+            ]},
+        ],
+        "max_output_tokens": 1,
+        "temperature": 0,
+    })
+    assert res.status_code == 200, res.body
+    if endpoint.endswith("/input_tokens"):
+        assert res.body["input_tokens"] > 0
+    else:
+        assert res.body["object"] == "response"
+        assert res.body["usage"]["input_tokens"] > 0
+
+
+# Codex exposes grouped tools (Multi-Agent V1 sub-agent tools, MCP server tools) as "namespace"
+# entries. Chat Completions has no grouping, so llama-server flattens a namespaced tool to
+# "<namespace>.<tool>", escaping a literal . as "..". The model must see the flattened name and
+# a Responses client must get the separate namespace back.
+TOOL_CALL_TEMPLATE = str(Path(__file__).resolve().parents[4] / "models" / "templates" /
+                                "meta-llama-Llama-3.3-70B-Instruct.jinja")
+
+
+def function_tool(name: str, description: str) -> dict:
+    return {
+        "type": "function",
+        "name": name,
+        "description": description,
+        "parameters": {
+            "type": "object",
+            "properties": {"input": {"type": "string"}},
+            "required": ["input"],
+        },
+    }
+
+
+NAMESPACE_TOOLS = [
+    {
+        "type": "namespace",
+        "name": "multi_agent_v1",
+        "tools": [
+            function_tool("spawn_agent", "Spawn a sub agent"),
+            function_tool("wait_agent", "Wait for a sub agent"),
+        ],
+    },
+    {
+        "type": "namespace",
+        "name": "mcp__files",
+        "tools": [function_tool("read.file", "Read a file")],
+    },
+]
+
+# what the namespace form above must be equivalent to
+FLATTENED_TOOLS = [
+    function_tool("multi_agent_v1.spawn_agent", "Spawn a sub agent"),
+    function_tool("multi_agent_v1.wait_agent", "Wait for a sub agent"),
+    function_tool("mcp__files.read..file", "Read a file"),
+]
+
+
+def start_tool_aware_server() -> None:
+    global server
+    server.jinja = True
+    # the tiny test model has no tool-aware template of its own
+    server.chat_template_file = TOOL_CALL_TEMPLATE
+    server.n_ctx = 4096
+    server.start()
+
+
+def count_prompt_tokens(endpoint: str, data: dict) -> int:
+    res = server.make_request("POST", endpoint, data=data)
+    assert res.status_code == 200, res.body
+    if endpoint.endswith("/input_tokens"):
+        return res.body["input_tokens"]
+    assert res.body["object"] == "response"
+    return res.body["usage"]["input_tokens"]
+
+
+@pytest.mark.parametrize("endpoint", ["/v1/responses", "/v1/responses/input_tokens"])
+def test_responses_namespace_tools_are_flattened(endpoint):
+    start_tool_aware_server()
+    base = {
+        "input": [{"role": "user", "content": "List the files in /tmp"}],
+        "max_output_tokens": 1,
+        "temperature": 0,
+    }
+
+    def count(tools: list | None) -> int:
+        data = dict(base)
+        if tools is not None:
+            data["tools"] = tools
+        return count_prompt_tokens(endpoint, data)
+
+    with_namespace = count(NAMESPACE_TOOLS)
+    with_flattened = count(FLATTENED_TOOLS)
+    without_tools = count(None)
+
+    # a namespace must reach the model as the equivalent list of flattened function tools
+    assert with_namespace == with_flattened, f"{with_namespace} != {with_flattened}"
+    # ... and those tools must actually be part of the prompt
+    assert with_namespace > without_tools, f"{with_namespace} <= {without_tools}"
+
+
+@pytest.mark.parametrize("endpoint", ["/v1/responses", "/v1/responses/input_tokens"])
+def test_responses_namespace_function_call_history(endpoint):
+    start_tool_aware_server()
+    arguments = '{"input": "work"}'
+
+    def count(function_call: dict) -> int:
+        return count_prompt_tokens(endpoint, {
+            "input": [
+                {"role": "user", "content": "Spawn a worker"},
+                function_call,
+                {"type": "function_call_output", "call_id": "call_spawn", "output": "worker started"},
+            ],
+            "tools": NAMESPACE_TOOLS,
+            "max_output_tokens": 1,
+            "temperature": 0,
+        })
+
+    namespaced = count({"type": "function_call", "namespace": "multi_agent_v1", "name": "spawn_agent",
+                        "arguments": arguments, "call_id": "call_spawn"})
+    flattened = count({"type": "function_call", "name": "multi_agent_v1.spawn_agent",
+                       "arguments": arguments, "call_id": "call_spawn"})
+    unprefixed = count({"type": "function_call", "name": "spawn_agent",
+                        "arguments": arguments, "call_id": "call_spawn"})
+
+    # replayed history must reference the same flattened name the converted tool list advertises
+    assert namespaced == flattened, f"{namespaced} != {flattened}"
+    # the namespace prefix must not be dropped on replay
+    assert namespaced > unprefixed, f"{namespaced} <= {unprefixed}"
+
+
+def test_responses_namespace_tools_do_not_warn(tmp_path):
+    global server
+    server.log_path = str(tmp_path / "llama-server.log")
+    start_tool_aware_server()
+
+    res = server.make_request("POST", "/v1/responses", data={
+        "input": "This is a test",
+        "max_output_tokens": 8,
+        "temperature": 0,
+        "tools": NAMESPACE_TOOLS + [
+            {"type": "web_search"},
+            {"type": "namespace", "name": "multi_agent_v1", "tools": [
+                function_tool("close_agent", "Close a sub agent"),
+                {"type": "custom", "name": "not_supported"},
+            ]},
+        ],
+    })
+    assert res.status_code == 200, res.body
+
+    events = list(server.make_stream_request("POST", "/v1/responses", data={
+        "input": "This is a test",
+        "max_output_tokens": 8,
+        "temperature": 0,
+        "tools": NAMESPACE_TOOLS,
+        "stream": True,
+    }))
+    completed = [e for e in events if e["type"] == "response.completed"]
+    assert completed, events
+    for item in completed[-1]["response"]["output"]:
+        if item.get("type") == "function_call":
+            # the flat name is an internal encoding: a Responses client gets namespace + name back
+            assert "." not in item["name"], item
+            assert "namespace" in item, item
+
+    server.stop()
+    log = Path(server.log_path).read_text(encoding="utf-8", errors="replace")
+
+    assert "unsupported Responses tool type 'namespace' skipped" not in log
+    # a genuinely unsupported nested tool must still be reported (and proves the log is captured)
+    assert "nested in namespace 'multi_agent_v1' skipped" in log
 
 def test_responses_with_openai_library():
     global server

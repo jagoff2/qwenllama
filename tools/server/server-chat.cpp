@@ -3,7 +3,96 @@
 
 #include <sstream>
 
-json server_chat_convert_responses_to_chatcmpl(const json & response_body) {
+static std::string server_chat_escape_namespace_tool_segment(const std::string & segment) {
+    std::string escaped;
+    escaped.reserve(segment.size());
+    for (const char c : segment) {
+        if (c == '.') {
+            escaped += '.';
+        }
+        escaped += c;
+    }
+    return escaped;
+}
+
+std::string server_chat_encode_namespace_tool_name(const std::string & tool_namespace, const std::string & tool_name) {
+    if (tool_namespace.empty()) {
+        return tool_name;
+    }
+    return server_chat_escape_namespace_tool_segment(tool_namespace) + "."
+         + server_chat_escape_namespace_tool_segment(tool_name);
+}
+
+bool server_chat_decode_namespace_tool_name(const std::string & flat_name, std::string & tool_namespace, std::string & tool_name) {
+    std::string segment;
+    std::string ns;
+    bool separator_seen = false;
+
+    for (size_t i = 0; i < flat_name.size(); ++i) {
+        const char c = flat_name[i];
+        if (c != '.') {
+            segment += c;
+            continue;
+        }
+        if (i + 1 < flat_name.size() && flat_name[i + 1] == '.') {
+            segment += '.'; // ".." is an escaped literal '.'
+            ++i;
+            continue;
+        }
+        if (separator_seen) {
+            return false; // more than one separator: not produced by the encoder
+        }
+        ns = segment;
+        segment.clear();
+        separator_seen = true;
+    }
+
+    if (!separator_seen || ns.empty() || segment.empty()) {
+        return false; // plain (non-namespaced) tool name, or a malformed encoding
+    }
+
+    tool_namespace = ns;
+    tool_name      = segment;
+    return true;
+}
+
+static json responses_content_to_chatcmpl(const json & content, bool allow_image, bool allow_refusal = false) {
+    auto result = json::array();
+    for (const auto & part : content) {
+        const std::string type = json_value(part, "type", std::string());
+        if (type == "input_text" || type == "output_text" || type == "text") {
+            if (!part.contains("text") || !part.at("text").is_string()) {
+                SRV_WRN("Responses content type '%s' without string 'text' skipped\n", type.c_str());
+                continue;
+            }
+            result.push_back({{"type", "text"}, {"text", part.at("text")}});
+        } else if (type == "input_image") {
+            if (!part.contains("image_url") || !part.at("image_url").is_string() || part.at("image_url").get<std::string>().empty()) {
+                SRV_WRN("%s\n", "Responses input_image without a non-empty image_url skipped (file_id is not supported)");
+                continue;
+            }
+            if (!allow_image) {
+                SRV_WRN("%s\n", "Responses input_image skipped: image input is unavailable; load a vision-capable model and mmproj");
+                continue;
+            }
+            json image_url = {{"url", part.at("image_url")}};
+            if (part.contains("detail") && part.at("detail").is_string()) {
+                image_url["detail"] = part.at("detail");
+            }
+            result.push_back({{"type", "image_url"}, {"image_url", image_url}});
+        } else if (type == "refusal" && allow_refusal) {
+            if (!part.contains("refusal") || !part.at("refusal").is_string()) {
+                throw std::invalid_argument("'Refusal' requires 'refusal'");
+            }
+            result.push_back({{"type", "refusal"}, {"refusal", part.at("refusal")}});
+        } else {
+            SRV_WRN("unsupported Responses content type '%s' skipped\n", type.c_str());
+        }
+    }
+    return result;
+}
+
+json server_chat_convert_responses_to_chatcmpl(const json & response_body, bool allow_image) {
     if (!response_body.contains("input")) {
         throw std::invalid_argument("'input' is required");
     }
@@ -63,38 +152,7 @@ json server_chat_convert_responses_to_chatcmpl(const json & response_body) {
                     item.at("role") == "developer")
             ) {
                 // #responses_create-input-input_item_list-item-input_message
-                std::vector<json> chatcmpl_content;
-
-                for (const json & input_item : item.at("content")) {
-                    const std::string type = json_value(input_item, "type", std::string());
-
-                    if (type == "input_text") {
-                        if (!input_item.contains("text")) {
-                            throw std::invalid_argument("'Input text' requires 'text'");
-                        }
-                        chatcmpl_content.push_back({
-                            {"text", input_item.at("text")},
-                            {"type", "text"},
-                        });
-                    } else if (type == "input_image") {
-                        // While `detail` is marked as required,
-                        // it has default value("auto") and can be omitted.
-
-                        if (!input_item.contains("image_url")) {
-                            throw std::invalid_argument("'image_url' is required");
-                        }
-                        chatcmpl_content.push_back({
-                            {"image_url", json {
-                                {"url", input_item.at("image_url")}
-                            }},
-                            {"type", "image_url"},
-                        });
-                    } else if (type == "input_file") {
-                        throw std::invalid_argument("'input_file' is not supported by llamacpp at this moment");
-                    } else {
-                        throw std::invalid_argument("'type' must be one of 'input_text', 'input_image', or 'input_file'");
-                    }
-                }
+                auto chatcmpl_content = responses_content_to_chatcmpl(item.at("content"), allow_image);
 
                 if (item.contains("type")) {
                     item.erase("type");
@@ -121,30 +179,7 @@ json server_chat_convert_responses_to_chatcmpl(const json & response_body) {
                         {"type", "text"},
                     });
                 } else if (exists_and_is_array(item, "content")) {
-                    // Array content - process each item
-                    for (const auto & output_text : item.at("content")) {
-                        const std::string type = json_value(output_text, "type", std::string());
-                        if (type == "output_text" || type == "input_text") {
-                            // Accept both output_text and input_text (string content gets converted to input_text)
-                            if (!exists_and_is_string(output_text, "text")) {
-                                throw std::invalid_argument("'Output text' requires 'text'");
-                            }
-                            chatcmpl_content.push_back({
-                                {"text", output_text.at("text")},
-                                {"type", "text"},
-                            });
-                        } else if (type == "refusal") {
-                            if (!exists_and_is_string(output_text, "refusal")) {
-                                throw std::invalid_argument("'Refusal' requires 'refusal'");
-                            }
-                            chatcmpl_content.push_back({
-                                {"refusal", output_text.at("refusal")},
-                                {"type", "refusal"},
-                            });
-                        } else {
-                            throw std::invalid_argument("'type' must be one of 'output_text' or 'refusal'");
-                        }
-                    }
+                    chatcmpl_content = responses_content_to_chatcmpl(item.at("content"), allow_image, true);
                 }
 
                 if (merge_prev) {
@@ -167,10 +202,15 @@ json server_chat_convert_responses_to_chatcmpl(const json & response_body) {
                 item.at("type") == "function_call"
             ) {
                 // #responses_create-input-input_item_list-item-function_tool_call
+                // Codex reports namespaced calls with a separate "namespace" field. Replay them under
+                // the flat name that the tools[] conversion advertised to the chat layer.
+                const std::string flat_name = server_chat_encode_namespace_tool_name(
+                    json_value(item, "namespace", std::string()),
+                    item.at("name").get<std::string>());
                 json tool_call = {
                     {"function", json {
                         {"arguments", item.at("arguments")},
-                        {"name",      item.at("name")},
+                        {"name",      flat_name},
                     }},
                     {"id",   item.at("call_id")},
                     {"type", "function"},
@@ -201,13 +241,7 @@ json server_chat_convert_responses_to_chatcmpl(const json & response_body) {
                         {"tool_call_id", item.at("call_id")},
                     });
                 } else {
-                    json chatcmpl_outputs = item.at("output");
-                    for (json & chatcmpl_output : chatcmpl_outputs) {
-                        if (!chatcmpl_output.contains("type") || chatcmpl_output.at("type") != "input_text") {
-                            throw std::invalid_argument("Output of tool call should be 'Input text'");
-                        }
-                        chatcmpl_output["type"] = "text";
-                    }
+                    auto chatcmpl_outputs = responses_content_to_chatcmpl(item.at("output"), allow_image);
                     chatcmpl_messages.push_back(json {
                         {"content",      chatcmpl_outputs},
                         {"role",         "tool"},
@@ -253,24 +287,57 @@ json server_chat_convert_responses_to_chatcmpl(const json & response_body) {
         if (!response_body.at("tools").is_array()) {
             throw std::invalid_argument("'tools' must be an array of objects");
         }
+        // A Responses "namespace" tool groups nested function tools. Chat Completions has no grouping,
+        // so every nested tool becomes a top-level function with a reversible flat name.
+        auto to_chatcmpl_function_tool = [](json & resp_tool) {
+            resp_tool.erase("type");
+            if (!resp_tool.contains("strict")) {
+                resp_tool["strict"] = true;
+            }
+            json chatcmpl_tool;
+            chatcmpl_tool["type"]     = "function";
+            chatcmpl_tool["function"] = resp_tool;
+            return chatcmpl_tool;
+        };
+
         std::vector<json> chatcmpl_tools;
         for (json resp_tool : response_body.at("tools")) {
-            json chatcmpl_tool;
-
             const std::string type = json_value(resp_tool, "type", std::string());
+
+            if (type == "namespace") {
+                const std::string tool_namespace = json_value(resp_tool, "name", std::string());
+                if (tool_namespace.empty()) {
+                    SRV_WRN("%s\n", "Responses 'namespace' tool without a valid 'name' skipped");
+                    continue;
+                }
+                if (!resp_tool.contains("tools") || !resp_tool.at("tools").is_array()) {
+                    SRV_WRN("Responses 'namespace' tool '%s' without a nested 'tools' array skipped\n", tool_namespace.c_str());
+                    continue;
+                }
+                for (json nested_tool : resp_tool.at("tools")) {
+                    const std::string nested_type = json_value(nested_tool, "type", std::string());
+                    if (nested_type != "function") {
+                        SRV_WRN("unsupported Responses tool type '%s' nested in namespace '%s' skipped\n",
+                            nested_type.c_str(), tool_namespace.c_str());
+                        continue;
+                    }
+                    if (!nested_tool.contains("name") || !nested_tool.at("name").is_string()) {
+                        SRV_WRN("Responses function tool nested in namespace '%s' without a valid 'name' skipped\n", tool_namespace.c_str());
+                        continue;
+                    }
+                    nested_tool["name"] = server_chat_encode_namespace_tool_name(
+                        tool_namespace, nested_tool.at("name").get<std::string>());
+                    chatcmpl_tools.push_back(to_chatcmpl_function_tool(nested_tool));
+                }
+                continue;
+            }
+
             if (type != "function") {
                 // Non-function Responses tools have no Chat Completions equivalent.
                 SRV_WRN("unsupported Responses tool type '%s' skipped\n", type.c_str());
                 continue;
             }
-            resp_tool.erase("type");
-            chatcmpl_tool["type"] = "function";
-
-            if (!resp_tool.contains("strict")) {
-                resp_tool["strict"] = true;
-            }
-            chatcmpl_tool["function"] = resp_tool;
-            chatcmpl_tools.push_back(chatcmpl_tool);
+            chatcmpl_tools.push_back(to_chatcmpl_function_tool(resp_tool));
         }
         chatcmpl_body.erase("tools");
         if (!chatcmpl_tools.empty()) {

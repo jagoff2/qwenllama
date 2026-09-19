@@ -8,6 +8,7 @@
 #include "../src/llama-grammar.h"
 #include "../src/unicode.h"
 #include "../tools/server/server-chat.h"
+#include "../tools/server/server-task.h"
 #include "chat-auto-parser.h"
 #include "chat.h"
 #include "common.h"
@@ -1788,8 +1789,405 @@ static void test_tools_oaicompat_json_conversion() {
                   common_chat_tools_to_json_oaicompat({ special_function_tool }).dump(2));
 }
 
+static void test_namespace_tool_names() {
+    LOG_DBG("%s\n", __func__);
+
+    struct ns_case {
+        std::string ns;
+        std::string name;
+        std::string flat;
+    };
+
+    const std::vector<ns_case> cases = {
+        { "multi_agent_v1", "spawn_agent", "multi_agent_v1.spawn_agent" },
+        { "multi_agent_v1", "wait_agent",  "multi_agent_v1.wait_agent"  },
+        { "foo.bar",        "baz.qux",     "foo..bar.baz..qux"          },
+        { "mcp__files",     "read.file",   "mcp__files.read..file"      },
+        { "a.",             "b",           "a...b"                      },
+        { ".",              "x",           "...x"                       },
+    };
+
+    for (const ns_case & c : cases) {
+        assert_equals(c.flat, server_chat_encode_namespace_tool_name(c.ns, c.name));
+
+        std::string decoded_ns;
+        std::string decoded_name;
+        assert_equals(true, server_chat_decode_namespace_tool_name(c.flat, decoded_ns, decoded_name));
+        assert_equals(c.ns, decoded_ns);
+        assert_equals(c.name, decoded_name);
+    }
+
+    // Plain Chat Completions tool names (Codex built-ins) stay untouched and decode as plain.
+    for (const std::string & name : { std::string("exec_command"), std::string("apply_patch"),
+                                      std::string("update_plan"), std::string("view_image") }) {
+        assert_equals(name, server_chat_encode_namespace_tool_name("", name));
+
+        std::string decoded_ns;
+        std::string decoded_name;
+        assert_equals(false, server_chat_decode_namespace_tool_name(name, decoded_ns, decoded_name));
+        assert_equals(std::string(""), decoded_ns);
+        assert_equals(std::string(""), decoded_name);
+    }
+
+    // Names that the encoder could not have produced must not be split.
+    for (const std::string & flat : { std::string(""), std::string("."), std::string(".."), std::string(".x"),
+                                      std::string("x."), std::string("a.b.c") }) {
+        std::string decoded_ns;
+        std::string decoded_name;
+        assert_equals(false, server_chat_decode_namespace_tool_name(flat, decoded_ns, decoded_name));
+    }
+}
+
+static void test_convert_responses_namespace_tools_to_chatcmpl() {
+    LOG_DBG("%s\n", __func__);
+
+    // Codex groups Multi-Agent V1 and MCP tools under a "namespace" entry.
+    const json input = json::parse(R"({
+        "input": "hello",
+        "tools": [
+            {"type": "function", "name": "exec_command", "description": "run a command",
+             "parameters": {"type": "object", "properties": {"cmd": {"type": "string"}}}},
+            {"type": "namespace", "name": "multi_agent_v1", "description": "sub agents", "tools": [
+                {"type": "function", "name": "spawn_agent", "description": "spawn",
+                 "parameters": {"type": "object", "properties": {}}},
+                {"type": "function", "name": "wait_agent", "description": "wait", "strict": false,
+                 "parameters": {"type": "object", "properties": {}}},
+                {"type": "custom", "name": "not_supported"}
+            ]},
+            {"type": "namespace", "name": "mcp__files", "tools": [
+                {"type": "function", "name": "read.file", "parameters": {"type": "object", "properties": {}}}
+            ]},
+            {"type": "namespace", "tools": []},
+            {"type": "namespace", "name": "no_nested_tools"},
+            {"type": "web_search"}
+        ]
+    })");
+
+    const json result = server_chat_convert_responses_to_chatcmpl(input);
+    const json & tools = result.at("tools");
+
+    // one entry per nested function plus the plain top-level tool; everything else is skipped
+    assert_equals((size_t)4, tools.size());
+    assert_equals(std::string("exec_command"), tools[0].at("function").at("name").get<std::string>());
+    assert_equals(std::string("multi_agent_v1.spawn_agent"), tools[1].at("function").at("name").get<std::string>());
+    assert_equals(std::string("multi_agent_v1.wait_agent"), tools[2].at("function").at("name").get<std::string>());
+    assert_equals(std::string("mcp__files.read..file"), tools[3].at("function").at("name").get<std::string>());
+
+    for (const json & tool : tools) {
+        assert_equals(std::string("function"), tool.at("type").get<std::string>());
+        assert_equals(false, tool.at("function").contains("type")); // the Responses wrapper is removed
+    }
+
+    // nested fields survive the flattening; strict keeps the existing default
+    assert_equals(std::string("run a command"), tools[0].at("function").at("description").get<std::string>());
+    assert_equals(true, tools[0].at("function").at("strict").get<bool>());
+    assert_equals(std::string("spawn"), tools[1].at("function").at("description").get<std::string>());
+    assert_equals(true, tools[1].at("function").at("strict").get<bool>());
+    assert_equals(false, tools[2].at("function").at("strict").get<bool>());
+    assert_equals(true, tools[1].at("function").at("parameters") == json::parse(R"({"type":"object","properties":{}})"));
+
+    // Replayed history must reference the same flattened names as the converted tool list.
+    const json history = json::parse(R"({
+        "input": [
+            {"type": "function_call", "namespace": "multi_agent_v1", "name": "spawn_agent",
+             "arguments": "{\"task\":\"x\"}", "call_id": "call_spawn"},
+            {"type": "function_call", "name": "exec_command",
+             "arguments": "{\"cmd\":\"ls\"}", "call_id": "call_exec"},
+            {"type": "function_call", "namespace": "mcp__files", "name": "read.file",
+             "arguments": "{}", "call_id": "call_read"},
+            {"type": "function_call_output", "call_id": "call_spawn", "output": "ok"}
+        ]
+    })");
+
+    const json converted = server_chat_convert_responses_to_chatcmpl(history);
+    const json & messages = converted.at("messages");
+    assert_equals((size_t)2, messages.size());
+    assert_equals(std::string("assistant"), messages[0].at("role").get<std::string>());
+    assert_equals((size_t)3, messages[0].at("tool_calls").size());
+
+    assert_equals(std::string("multi_agent_v1.spawn_agent"),
+        messages[0].at("tool_calls")[0].at("function").at("name").get<std::string>());
+    assert_equals(std::string("call_spawn"), messages[0].at("tool_calls")[0].at("id").get<std::string>());
+    assert_equals(std::string("function"), messages[0].at("tool_calls")[0].at("type").get<std::string>());
+    assert_equals(std::string("exec_command"),
+        messages[0].at("tool_calls")[1].at("function").at("name").get<std::string>());
+    assert_equals(std::string("mcp__files.read..file"),
+        messages[0].at("tool_calls")[2].at("function").at("name").get<std::string>());
+    assert_equals(std::string("tool"), messages[1].at("role").get<std::string>());
+
+    // the name the model is shown and the name the history replays must be identical
+    assert_equals(tools[1].at("function").at("name").get<std::string>(),
+        messages[0].at("tool_calls")[0].at("function").at("name").get<std::string>());
+}
+
+static void test_responses_namespaced_function_call() {
+    LOG_DBG("%s\n", __func__);
+
+    common_chat_msg msg;
+    msg.role = "assistant";
+    msg.tool_calls = {
+        { "multi_agent_v1.spawn_agent", "{\"task\":\"x\"}", "spawn"  },
+        { "foo..bar.baz..qux",          "{}",               "dotted" },
+        { "exec_command",               "{\"cmd\":\"ls\"}", "exec"   },
+    };
+
+    auto check_item = [](const json & item, const std::string & call, const std::string & name,
+                         const std::string & ns, const std::string & arguments) {
+        assert_equals(std::string("function_call"), item.at("type").get<std::string>());
+        assert_equals(std::string("fc_" + call), item.at("id").get<std::string>());
+        assert_equals(std::string("call_" + call), item.at("call_id").get<std::string>());
+        assert_equals(arguments, item.at("arguments").get<std::string>());
+        assert_equals(name, item.at("name").get<std::string>());
+        if (ns.empty()) {
+            assert_equals(false, item.contains("namespace"));
+        } else {
+            assert_equals(ns, item.at("namespace").get<std::string>());
+        }
+    };
+
+    const std::vector<std::string> completed_args   = { "{\"task\":\"x\"}", "{}", "{\"cmd\":\"ls\"}" };
+    // partial output_item.added announces the call before any argument delta arrives
+    const std::vector<std::string> in_progress_args = { "", "", "" };
+
+    auto check_set = [&check_item](const json & output, const std::vector<std::string> & arguments) {
+        assert_equals((size_t)3, output.size());
+        check_item(output[0], "spawn",  "spawn_agent",  "multi_agent_v1", arguments[0]);
+        check_item(output[1], "dotted", "baz.qux",      "foo.bar",        arguments[1]);
+        check_item(output[2], "exec",   "exec_command", "",               arguments[2]);
+    };
+
+    auto fill = [&msg](server_task_result_cmpl_final & res) {
+        res.oaicompat_msg          = msg;
+        res.oai_resp_id            = "resp_test";
+        res.oaicompat_model        = "test-model";
+        res.n_prompt_tokens        = 8;
+        res.n_decoded              = 4;
+        res.n_prompt_tokens_cache  = 2;
+    };
+
+    // non-streaming /v1/responses output
+    server_task_result_cmpl_final final_res;
+    fill(final_res);
+    const json out = final_res.to_json_oaicompat_resp();
+    assert_equals(std::string("response"), out.at("object").get<std::string>());
+    check_set(out.at("output"), completed_args);
+    assert_equals(std::string("completed"), out.at("output")[0].at("status").get<std::string>());
+
+    // streaming output_item.done events plus the response.completed payload
+    server_task_result_cmpl_final stream_res;
+    fill(stream_res);
+    const json events = stream_res.to_json_oaicompat_resp_stream();
+
+    std::vector<json> done_items;
+    for (const json & event : events) {
+        if (event.at("event").get<std::string>() != "response.output_item.done") {
+            continue;
+        }
+        const json & item = event.at("data").at("item");
+        if (item.at("type").get<std::string>() == "function_call") {
+            done_items.push_back(item);
+        }
+    }
+    check_set(json(done_items), completed_args);
+    assert_equals(std::string("completed"), done_items[0].at("status").get<std::string>());
+
+    assert_equals(std::string("response.completed"), events.back().at("event").get<std::string>());
+    check_set(events.back().at("data").at("response").at("output"), completed_args);
+
+    // partial streaming: the item announces the namespaced call, arguments arrive as deltas
+    server_task_result_cmpl_partial partial_res;
+    partial_res.oai_resp_created = true;
+    partial_res.oai_resp_id      = "resp_test";
+    for (const auto & tool_call : msg.tool_calls) {
+        common_chat_msg_diff diff;
+        diff.tool_call_delta = tool_call;
+        partial_res.oaicompat_msg_diffs.push_back(diff);
+    }
+
+    const json partial_events = partial_res.to_json_oaicompat_resp();
+    std::vector<json> added_items;
+    for (const json & event : partial_events) {
+        if (event.at("event").get<std::string>() == "response.output_item.added") {
+            added_items.push_back(event.at("data").at("item"));
+        }
+    }
+    check_set(json(added_items), in_progress_args);
+    assert_equals(std::string("in_progress"), added_items[0].at("status").get<std::string>());
+    assert_equals(std::string(""), added_items[0].at("arguments").get<std::string>());
+
+    bool found_delta = false;
+    for (const json & event : partial_events) {
+        if (event.at("event").get<std::string>() != "response.function_call_arguments.delta") {
+            continue;
+        }
+        if (event.at("data").at("item_id").get<std::string>() == "fc_spawn") {
+            found_delta = true;
+            assert_equals(std::string("{\"task\":\"x\"}"), event.at("data").at("delta").get<std::string>());
+        }
+    }
+    assert_equals(true, found_delta);
+
+    // the shared helper itself
+    const common_chat_tool_call tool_call{ "multi_agent_v1.resume_agent", "{\"id\":\"a\"}", "resume" };
+    check_item(server_task_responses_function_call_item(tool_call, "completed", tool_call.arguments),
+        "resume", "resume_agent", "multi_agent_v1", "{\"id\":\"a\"}");
+
+    const json started = server_task_responses_function_call_item(tool_call, "in_progress", "");
+    assert_equals(std::string("in_progress"), started.at("status").get<std::string>());
+    assert_equals(std::string(""), started.at("arguments").get<std::string>());
+}
+
 static void test_convert_responses_to_chatcmpl() {
     LOG_DBG("%s\n", __func__);
+
+    // Text aliases must work in every Responses message role.
+    for (const char * role : { "system", "developer", "user", "assistant" }) {
+        for (const char * type : { "input_text", "output_text", "text" }) {
+            const json input = {
+                {"input", json::array({{
+                    {"type", "message"},
+                    {"role", role},
+                    {"content", json::array({{{"type", type}, {"text", "Preserve this text"}}})},
+                }})},
+            };
+            const json expected = json::array({{
+                {"role", role},
+                {"content", json::array({{{"type", "text"}, {"text", "Preserve this text"}}})},
+            }});
+            const json result = server_chat_convert_responses_to_chatcmpl(input);
+            assert_equals(expected.dump(), result.at("messages").dump());
+        }
+    }
+
+    // Codex tool results can contain output_text, including the Viewed Image status.
+    {
+        const json input = json::parse(R"({
+            "input": [
+                {"type": "function_call", "call_id": "call_image", "name": "view_image", "arguments": "{}"},
+                {"type": "function_call_output", "call_id": "call_image", "output": [
+                    {"type": "output_text", "text": "Viewed Image"},
+                    {"type": "input_text", "text": "\nSecond block"},
+                    {"type": "text", "text": "\nThird block"}
+                ]}
+            ]
+        })");
+        const json result = server_chat_convert_responses_to_chatcmpl(input);
+        const json expected = json::parse(R"({
+            "role": "tool",
+            "tool_call_id": "call_image",
+            "content": [
+                {"type": "text", "text": "Viewed Image"},
+                {"type": "text", "text": "\nSecond block"},
+                {"type": "text", "text": "\nThird block"}
+            ]
+        })");
+        assert_equals((size_t)2, result.at("messages").size());
+        const auto & tool_result = result.at("messages")[1];
+        assert_equals(expected.at("role").get<std::string>(), tool_result.at("role").get<std::string>());
+        assert_equals(expected.at("tool_call_id").get<std::string>(), tool_result.at("tool_call_id").get<std::string>());
+        assert_equals(expected.at("content").dump(), tool_result.at("content").dump());
+        assert_equals(std::string("call_image"), result.at("messages")[0].at("tool_calls")[0].at("id").get<std::string>());
+    }
+
+    // Unknown and malformed blocks must not discard valid neighboring text.
+    for (const std::string role : { "tool", "system", "developer", "user", "assistant" }) {
+        json input = json::parse(R"({
+            "input": [{"type": "function_call_output", "call_id": "call_mixed", "output": [
+                {"type": "output_text", "text": "Before"},
+                {"type": "input_file", "file_id": "file_unsupported"},
+                {"type": "unknown", "text": "Do not include"},
+                null,
+                "unexpected string",
+                42,
+                {},
+                {"type": 42},
+                {"type": "text"},
+                {"type": "output_text", "text": null},
+                {"type": "input_text", "text": 42},
+                {"type": "input_image", "file_id": "file_unsupported"},
+                {"type": "input_image", "image_url": null},
+                {"type": "text", "text": "After"}
+            ]}]
+        })");
+        if (role != "tool") {
+            auto & item = input["input"][0];
+            item = {{"type", "message"}, {"role", role}, {"content", item.at("output")}};
+        }
+        const json result = server_chat_convert_responses_to_chatcmpl(input);
+        const json expected = json::parse(R"([
+            {"type": "text", "text": "Before"},
+            {"type": "text", "text": "After"}
+        ])");
+        assert_equals(expected.dump(), result.at("messages")[0].at("content").dump());
+    }
+
+    // Decoded tool images must reach the media marker and buffer consumed by mtmd.
+    {
+        const json input = json::parse(R"({
+            "input": [
+                {"role": "user", "content": "Describe the image"},
+                {"type": "function_call", "call_id": "call_image", "name": "view_image", "arguments": "{}"},
+                {"type": "function_call_output", "call_id": "call_image", "output": [
+                    {"type": "output_text", "text": "Viewed Image"},
+                    {"type": "input_image", "image_url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg=="}
+                ]}
+            ]
+        })");
+        json body = server_chat_convert_responses_to_chatcmpl(input);
+        server_chat_params opt{};
+        opt.tmpls = read_templates("models/templates/Qwen-Qwen3-0.6B.jinja");
+        opt.use_jinja = true;
+        opt.allow_image = true;
+        opt.reasoning_format = COMMON_REASONING_FORMAT_NONE;
+        std::vector<raw_buffer> out_files;
+        const json result = oaicompat_chat_params_parse(body, opt, out_files);
+        assert_equals((size_t)1, out_files.size());
+        assert_equals((size_t)70, out_files[0].size());
+        assert_equals((uint8_t)0x89, out_files[0][0]);
+        const auto prompt = result.at("prompt").get<std::string>();
+        assert_contains(prompt, "Viewed Image");
+        assert_contains(prompt, get_media_marker());
+    }
+
+    // Preserve tool images for the existing Chat Completions multimodal pipeline.
+    for (const bool tool_output : { false, true }) {
+        const json content = json::parse(R"([
+            {"type": "output_text", "text": "Viewed Image"},
+            {"type": "input_image", "image_url": "data:image/png;base64,aW1hZ2U=", "detail": "high"},
+            {"type": "input_image", "image_url": "https://example.com/image.png"}
+        ])");
+        const json item = tool_output
+            ? json{{"type", "function_call_output"}, {"call_id", "call_image"}, {"output", content}}
+            : json{{"type", "message"}, {"role", "user"}, {"content", content}};
+        const json result = server_chat_convert_responses_to_chatcmpl({{"input", json::array({item})}});
+        const json expected = json::parse(R"([
+            {"type": "text", "text": "Viewed Image"},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,aW1hZ2U=", "detail": "high"}},
+            {"type": "image_url", "image_url": {"url": "https://example.com/image.png"}}
+        ])");
+        assert_equals(expected.dump(), result.at("messages")[0].at("content").dump());
+
+        const json without_images = server_chat_convert_responses_to_chatcmpl({{"input", json::array({item})}}, false);
+        assert_equals((size_t)1, without_images.at("messages")[0].at("content").size());
+        assert_equals(std::string("Viewed Image"), without_images.at("messages")[0].at("content")[0].at("text").get<std::string>());
+
+        if (tool_output) {
+            json image_only = item;
+            image_only["output"] = json::array({content[1]});
+            const json image_result = server_chat_convert_responses_to_chatcmpl({{"input", json::array({image_only})}});
+            assert_equals(json::array({expected[1]}).dump(), image_result.at("messages")[0].at("content").dump());
+        }
+    }
+
+    // Keep string and empty tool results valid.
+    for (const json & output : { json("Viewed Image"), json::array(), json::array({{{"type", "unknown"}}}) }) {
+        const json result = server_chat_convert_responses_to_chatcmpl({
+            {"input", json::array({{{"type", "function_call_output"}, {"call_id", "call_empty"}, {"output", output}}})},
+        });
+        const json expected = output.is_string() ? output : json::array();
+        assert_equals(expected.dump(), result.at("messages")[0].at("content").dump());
+        assert_equals(std::string("call_empty"), result.at("messages")[0].at("tool_call_id").get<std::string>());
+    }
 
     // Test basic conversion with input messages (user/assistant alternating)
     {
@@ -7325,6 +7723,9 @@ int main(int argc, char ** argv) {
         test_msg_token_delimiters_split();
         test_tools_oaicompat_json_conversion();
         test_convert_responses_to_chatcmpl();
+        test_namespace_tool_names();
+        test_convert_responses_namespace_tools_to_chatcmpl();
+        test_responses_namespaced_function_call();
         test_developer_role_to_system_workaround();
         test_deepseek_v4_thinking_retention();
         test_deepseek_v4_tool_result_ordering();
