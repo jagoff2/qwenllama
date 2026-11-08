@@ -2261,7 +2261,9 @@ ggml_tensor * llm_graph_context::build_moe_ffn(
     cur = ggml_reshape_3d(ctx0, cur, n_embd, 1, n_tokens);
     ggml_tensor * mc_inp = cur;
     ggml_tensor * mc_cpu_ids = selected_experts;
-    if (mc_on) {
+    const char * compact_env = getenv("LLAMA_FN_CACHE_COMPACT_DECODE");
+    const bool compact_decode = mc_on && n_tokens == 1 && compact_env && atoi(compact_env) != 0;
+    if (mc_on && !compact_decode) {
         // Finish the D2H copies before launching the independent cache branch.
         // CONT owns distinct CPU storage (it is not an in-place eligible op).
         // Its real edges to all three masked MMIDs keep both copies live until
@@ -2445,14 +2447,14 @@ ggml_tensor * llm_graph_context::build_moe_ffn(
                 return tensor;
             }
             const size_t bytes = GGML_PAD(ggml_nbytes(tensor), 512);
-            while (scratch_offset + bytes > llama_moe_cache_scratch_capacity(moe_cache, extent)) {
+            while (scratch_offset + bytes > llama_moe_cache_scratch_capacity(moe_cache, mc_bind.device, extent)) {
                 ++extent;
                 scratch_offset = 0;
-                if (!llama_moe_cache_scratch_capacity(moe_cache, extent)) {
+                if (!llama_moe_cache_scratch_capacity(moe_cache, mc_bind.device, extent)) {
                     throw std::runtime_error("decode expert graph exceeds shared-pool scratch");
                 }
             }
-            if (!llama_moe_cache_scratch_bind(moe_cache, tensor, extent, scratch_offset)) {
+            if (!llama_moe_cache_scratch_bind(moe_cache, tensor, mc_bind.device, extent, scratch_offset)) {
                 throw std::runtime_error("cannot bind shared-pool decode scratch");
             }
             scratch_offset += bytes;

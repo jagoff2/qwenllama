@@ -1,0 +1,24 @@
+{
+  "case": "stock",
+  "version": "version: 0.4.0-dev (build 10870, commit 1945e0920)\nbuilt with Clang 20.1.8 for Windows x86_64",
+  "startup_s": 17.219284099992365,
+  "request_s": 15.111229300033301,
+  "timings": {
+    "cache_n": 0,
+    "prompt_n": 944,
+    "prompt_ms": 6177.128,
+    "prompt_per_token_ms": 6.543567796610169,
+    "prompt_per_second": 152.8218291736872,
+    "predicted_n": 192,
+    "predicted_ms": 8928.676,
+    "predicted_per_token_ms": 46.746994764397904,
+    "predicted_per_second": 21.39174945983033
+  },
+  "first_token_s": 6.1824921001680195,
+  "first_decode_gap_s": 0.0913086999207735,
+  "steady_from_token": 64,
+  "steady_to_token": 192,
+  "steady_tps": 21.314766396045407,
+  "tokens": [],
+  "content": "We need answer user's request. Need produce final answer: detailed technical tutorial at least 1500 words, start immediately. Need cover memory bandwidth, arithmetic intensity, cache admission, synchronization, thread counts, prefill versus decode, measurement methodology, numerical correctness. Use concrete examples and equations. Observations repeated same. Need explain performance of system: large MoE LLM using system RAM and two GPUs, expert weights mostly in RAM, token selects small subset experts per layer, CPU evaluates experts not resident on GPU. Expert cache can reduce CPU work but copies, sync, buffer lifetimes. Prompt processing batches many tokens, single token generation little work per operation.\n\nNeed likely discuss MoE inference, offloading, CPU/GPU, bandwidth, roofline, arithmetic intensity, cache admission policies, synchronization, thread counts, prefill vs decode, measurement methodology, numerical correctness. Need at least 1500 words. Need start immediately (no"
+}

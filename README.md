@@ -1,570 +1,101 @@
-> [!NOTE]
-> **This branch: Flash-Next (qwen4exp) MTP speculative decoding.** Adds working
-> NextN/MTP speculative decode for Qwen3.8-Flash-Next models plus QSA/PLE decode
-> performance paths and server checkpoint/MTP-rollback fixes. See
-> [FLASHNEXT_MTP.md](./FLASHNEXT_MTP.md) for features, measured numbers, and usage, and the
-> [full testing &amp; methodology documentation](https://noonr48.github.io/llama.cpp/flashnext-mtp/)
-> for how the tested model was built and verified. Runs everything stock llama.cpp runs; the
-> [tested model](https://huggingface.co/jackasda211233/Qwen3.8-Flash-Next-Uncensored-IQ4_NL) is on Hugging Face.
+# qwenllama: fast Flash-Next prefill and GPU-local decode
 
-# llama.cpp
+This llama.cpp fork runs Qwen Flash-Next (`qwen4exp`) models with CPU-resident MoE weights. Large prompts stream expert weights through temporary GPU arenas. During generation, a phase switch places expert caches on each layer's owning GPU, reducing CPU expert reads and GPU handoffs while retaining the original fast prefill configuration.
 
-![llama](https://raw.githubusercontent.com/ggml-org/llama.brand/refs/heads/master/cover/llama-cpp/cover-llama-cpp-dark.svg)
+On the tested i9-13900K and two RTX 5060 Ti 16 GB GPUs, controlled steady decode improved from **23.67 to 27.43 tokens/s** with eight CPU threads. The same 8192-token prefill remained about **18.2 seconds**. The switch adds **1.98 seconds** before steady generation, so short answers can see little benefit. **40 tokens/s has not been achieved.** [Recorded measurements](docs/performance/2026-11-08/README.md).
 
-<div align="center">
+## Launch the installed build
 
-<b>LLM inference in C/C++</b>
+The active Windows launcher is:
 
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-[![Release](https://img.shields.io/github/v/release/ggml-org/llama.cpp?filter=v*&color=brightgreen)](https://github.com/ggml-org/llama.cpp/releases?q=tag:v0)
-[![Nightly](https://img.shields.io/github/v/release/ggml-org/llama.cpp?label=nightly&filter=b*&color=orange)](https://github.com/ggml-org/llama.cpp/releases?q=b)
-[![Server](https://img.shields.io/github/actions/workflow/status/ggml-org/llama.cpp/server.yml?label=Server)](https://github.com/ggml-org/llama.cpp/actions/workflows/server.yml)
-[![Docker](https://img.shields.io/github/actions/workflow/status/ggml-org/llama.cpp/docker.yml?label=Docker)](https://github.com/ggml-org/llama.cpp/actions/workflows/docker.yml)
-[![Winget](https://img.shields.io/github/actions/workflow/status/ggml-org/llama.cpp/winget.yml?label=Winget)](https://github.com/ggml-org/llama.cpp/actions/workflows/winget.yml)
-
-[ggml](https://github.com/ggml-org/ggml) / [ops](https://github.com/ggml-org/llama.cpp/blob/master/docs/ops.md) / [maintainer PRs](https://github.com/ggml-org/llama.cpp/issues?q=is%3Apr%20is%3Aopen%20draft%3AFalse%20(author%3Argerganov%20OR%20author%3AKitaitiMakoto%20OR%20author%3Adanbev%20OR%20author%3Aaldehir%20OR%20author%3Amax-krasnyansky%20OR%20author%3ACISC%20OR%20author%3Aggerganov%20OR%20author%3Aam17an%20OR%20author%3Ajhen0409%20OR%20author%3Abartowski1182%20OR%20author%3Anikwen%20OR%20author%3Ahipudding%20OR%20author%3Aravi9%20OR%20author%3AServeurpersoCom%20OR%20author%3Apwilkin%20OR%20author%3Areeselevine%20OR%20author%3Angxson%20OR%20author%3Ajeffbolznv%20OR%20author%3Amarty1885%20OR%20author%3A0cc4m%20OR%20author%3ATitaniumtown%20OR%20author%3Aangt%20OR%20author%3AIMbackK%20OR%20author%3Aarthw%20OR%20author%3AJohannesGaessler%20OR%20author%3AORippler%20OR%20author%3Aruixiang63%20OR%20author%3Axctan%20OR%20author%3Aallozaur%20OR%20author%3Ayomaytk%20OR%20author%3Aaendk%20OR%20author%3Awine99%20OR%20author%3Agaugarg-nv%20OR%20author%3Ataronaeo%20OR%20author%3Aforforever73%20OR%20author%3Alhez%20OR%20author%3Anetrunnereve%20OR%20author%3Afairydreaming)%20sort%3Aupdated-desc) / [dev stats](https://github.com/ggml-org/llama.cpp-dev) / [lib llama API](https://github.com/ggml-org/llama.cpp/issues/9289) / [llama-server REST API](https://github.com/ggml-org/llama.cpp/issues/9291)
-
-</div>
-
-## Quick start
-
-A few options to get `llama.cpp` installed on your machine:
-
-- Visit https://llama.app and follow the instructions
-- Run with Docker - see our [Docker documentation](docs/docker.md)
-- Download pre-built binaries from the [releases page](https://github.com/ggml-org/llama.cpp/releases)
-- Build from source by cloning this repository - check out [our build guide](docs/build.md)
-
-Once installed:
-
-```sh
-# Download and run a model directly from Hugging Face
-llama cli -hf ggml-org/Qwen3.5-0.8B-GGUF
-
-# Launch OpenAI-compatible API server
-llama serve -hf ggml-org/Qwen3.5-0.8B-GGUF
+```powershell
+& 'G:\qwenllamaMTP\perf-20260911\bench\flashnext-stream-prefill\launch-best-decode-no-draft-think-guard.ps1'
 ```
 
-<table align="center">
-    <tr>
-        <td align="center" width=50%>
-            <img width="1310" height="888" alt="VLM session with `llama cli`" src="https://github.com/user-attachments/assets/88726b48-1713-48aa-a525-95a02e78afc4" />
-            <i>VLM session with <b>llama cli</b></i>
-        </td>
-        <td align="center">
-            <img width="1392" height="958" alt="Built-in web UI against `llama serve` running Qwen 3.6" src="https://github.com/user-attachments/assets/b402f972-2e32-4def-8771-8d849f08cf2e" />
-            <i>Built-in web UI against <b>llama serve</b></i>
-        </td>
-    </tr>
-<table>
+An exact snapshot is tracked at [examples/qwen38-codex/launch-local.ps1](examples/qwen38-codex/launch-local.ps1). It starts `perf-20260911/dist/fn-fast-prefill-local-decode-20261108/bin/llama-server.exe` with the original chat template, reasoning guard, and no draft model. The server binds to `127.0.0.1`.
 
-## Description
+The snapshot contains absolute paths for this machine. On another installation, edit its executable, GGUF model, projector, and chat-template paths. Weights and compiled binaries are external assets. [Launch configuration and rollback](examples/qwen38-codex/README.md).
 
-The main goal of `llama.cpp` is to enable LLM (and VLM) inference with minimal setup and state-of-the-art performance on
-a wide range of hardware - locally and in the cloud.
+## What is enabled
 
-- Plain C/C++ implementation without any dependencies
-- Apple silicon is a first-class citizen - optimized via ARM NEON, Accelerate and Metal frameworks
-- AVX, AVX2, AVX512 and AMX support for x86 architectures
-- RVV, ZVFH, ZFH, ZICBOP and ZIHINTPAUSE support for RISC-V architectures
-- 1.5-bit, 2-bit, 3-bit, 4-bit, 5-bit, 6-bit, and 8-bit integer quantization for faster inference and reduced memory use
-- Custom CUDA kernels for running LLMs on NVIDIA GPUs (support for AMD GPUs via HIP and Moore Threads GPUs via MUSA)
-- Vulkan and SYCL backend support
-- CPU+GPU hybrid inference to partially accelerate models larger than the total VRAM capacity
+| Setting | Active value |
+|---|---|
+| Model | Qwen3.8-Flash-Next UD-Q4_K_XL, four GGUF shards |
+| CPU / memory | i9-13900K; 192 GiB DDR5-5200, dual channel |
+| GPUs | 2 x RTX 5060 Ti, 16 GB each |
+| Context capacity / parallel slots | 261888 / 1 |
+| Batch / microbatch | 4096 / 4096 |
+| KV cache | F16 keys and values |
+| Layer placement | Layer split, tensor split 1,1; 46 CPU expert layers |
+| Prefill arenas | Primary GPU, 2 slots, 4096 MiB configured budget, 1024-token streaming threshold |
+| CPU threads | 8 for decode, 24 for batch execution |
+| Decode cache | 44 resident experts per CPU expert layer, on its owning GPU |
+| New controls | `GGML_CPU_MOE_N1=1`, `LLAMA_MOE_CACHE_PHASE_LAYOUT=1` |
 
-The `llama.cpp` project is build on top of the [ggml](https://github.com/ggml-org/ggml) library.
+The N=1, Top-10 masked MMID path compacts selected expert routes, skips experts already handled by the GPU cache, and distributes remaining rows through one CPU work queue. It reuses the existing quantization and dot-product routines. It does not replace large-batch prefill. Its isolated gain at eight threads was small; larger local caches and reduced handoff work produced the substantial gain.
 
-## Supported backends
+At an explicit prompt-to-generation boundary, the context synchronizes execution, releases temporary graph and expert pools, and recreates decode pools on both GPUs. Model weights, KV/state buffers, and prompt routing history survive. A later prompt batch above 49 tokens restores the original prefill allocation; shorter replay keeps the decode cache. This path is opt-in and restricted to QWEN4EXP without LoRA and with explicit prompt/generation purpose.
 
-| Backend | Target devices |
-| --- | --- |
-| [BLAS](docs/build.md#blas-build) | All |
-| [BLIS](docs/backend/BLIS.md) | All |
-| [CANN](docs/build.md#cann) | Ascend NPU |
-| [CUDA](docs/build.md#cuda) | Nvidia GPU |
-| [HIP](docs/build.md#hip) | AMD GPU |
-| [Hexagon](docs/backend/snapdragon/README.md) | Snapdragon |
-| [IBM zDNN](docs/backend/zDNN.md) | IBM Z & LinuxONE |
-| [MUSA](docs/build.md#musa) | Moore Threads GPU |
-| [Metal](docs/build.md#metal-build) | Apple Silicon |
-| [OpenCL](docs/backend/OPENCL.md) | Adreno GPU |
-qwenllama: Streamed MoE Prefill for Qwen Flash-Next
+## Measured performance
 
-This fork adds a streamed-expert prefill path for Qwen Flash-Next / "qwen4exp" models in "llama.cpp".
+The main comparison used one model load, four fresh contexts in off/on/on/off order, identical 8192-token prompts, and 320 forced decode tokens. Both sides used eight threads and the N=1 kernel. The steady metric excludes the first 64 tokens and includes synchronized logits retrieval.
 
-The goal is simple: when MoE expert weights do not fit in VRAM and would normally be evaluated from system RAM on the CPU, temporarily stream those weights into GPU memory and execute the expert GEMMs on the GPU instead.
+| Metric | Original pools | GPU-local decode pools |
+|---|---:|---:|
+| Steady decode, mean of two runs | 23.672 t/s | 27.429 t/s |
+| Initial prefill | 18.313 s | 18.176 s |
+| First decode step | 0.687 s | 2.665 s |
+| All 320 decode steps | 21.975 t/s | 21.915 t/s |
+| Scheduler splits per token | 208 | 187 |
+| CPU MoE operation time per token | 13.140 ms | 10.765 ms |
+| Logical CPU expert bytes per token | 818.941 MB | 642.641 MB |
+| GPU input-preparation host API time | 4.111 ms | 2.034 ms |
 
-On the target multi-GPU system, this moved large cold-prefill throughput into the roughly 400 tokens/sec class.
+Steady decode improved **15.87%**. Initial prefill differences are small and are not claimed as a prefill improvement. At these steady rates, about 342 subsequent tokens amortize the additional transition cost. Actual results depend on context, routing, and output length. Reducing splits to 137 in an earlier experiment made decode slower by losing overlap, so split count alone is not the target.
 
-The recent work consists of two closely related changes:
+Three controlled repeats per thread count found means of **21.307 t/s at 24 threads**, **23.582 t/s at 8**, and **21.020 t/s at 16**. This isolates the thread choice from the later cache-layout change. [Operation and thread summaries](docs/performance/2026-11-08/summary.json).
 
-1. Stream host-resident MoE expert weights through temporary VRAM arenas and run their GEMMs on GPU.
-2. Reduce QSA prefill memory pressure so larger micro-batches can fit and amortize the expert-transfer cost.
+Real 512-token HTTP chat tests retained the production prefill and template. Initial prompt processing took 29.224 seconds with original pools and 29.308 seconds with phase switching. Full generation averaged 21.58 versus 22.09 t/s; the last 128 streamed tokens reached 23.01 versus 25.76 t/s. In serving, the phase transition appears between the first and second output tokens. Natural outputs differed. [HTTP validation](docs/performance/2026-11-08/server-smoke-phase-512/validation.json).
 
-The problem
+## Brief comparison with stock llama.cpp
 
-Qwen Flash-Next is a sparse Mixture-of-Experts model.
+The retained stock installation is b10870 / `1945e0920` at `C:\Users\user\qwenllama`, verified against the saved release archive. One identical chat request per build used 944 prompt tokens, 192 output tokens, eight decode threads, and an 8192-token context.
 
-When the model is too large to keep all expert tensors in VRAM, llama.cpp can leave some expert weights in system RAM. The resulting execution path can make the CPU responsible for those MoE operations.
+| Metric | Stock b10870 | This fast build |
+|---|---:|---:|
+| Steady decode, token counters 64-192 | 21.31 t/s | 27.78 t/s |
+| Generation average, all output tokens | 21.39 t/s | 20.73 t/s |
+| First-to-second-token gap | 0.091 s | 2.243 s |
+| Whole request, excluding model loading | 15.111 s | 14.865 s |
 
-For large prefills, that becomes a major bottleneck:
+The steady improvement was 30.3% in this single screen, but the transition consumed most of the benefit on the short answer. Outputs and compiler/backend versions differed. This prompt was below the arena-streaming threshold, so this comparison does not measure large-prompt prefill. [Full stock comparison and provenance](docs/performance/2026-11-08/stock-vs-fast/RESULT.md).
 
-host-resident experts
-        |
-        v
-   CPU MoE GEMMs
-        |
-        v
-   GPU continues
+## Build and validation
 
-The GPUs may have substantial unused compute capacity while the CPU and host memory subsystem determine overall prefill speed.
+See the [build guide](docs/build.md) for prerequisites. A CUDA build from a configured x64 Visual Studio development shell can use:
 
-The streamed-expert path changes that.
+```powershell
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DGGML_CUDA=ON -DGGML_NATIVE=ON -DBUILD_SHARED_LIBS=ON -DLLAMA_OPENSSL=OFF
+cmake --build build --target llama-server test-backend-ops --parallel 8
+```
 
-Streamed expert prefill
+Update the tracked launch script to select the resulting executable and your asset paths. `GGML_NATIVE=ON` targets the build machine's CPU. Use the build guide when targeting other hardware.
 
-With streamed experts enabled, system RAM remains the authoritative storage for offloaded expert weights, but the expert computation itself is moved back to CUDA.
+The measured installed package uses rebuilt `ggml-base`, `ggml-cpu`, `llama`, and `llama-common` libraries with the original CUDA DLL and server executable. A fresh full source build is not the byte-identical measured package. [Binary hashes and activation record](docs/performance/2026-11-08/activation.json), [build provenance](docs/performance/2026-11-08/candidate-manifest.json).
 
-system RAM
-   expert weights
-        |
-        | PCIe H2D
-        v
-temporary VRAM arena
-        |
-        v
-GPU expert GEMMs
+Validation includes 32 dedicated N=1 fixtures within 176 total masked-operation cases, fixed-token ABBA replay, 49-token and 4096-token prompt re-entry, and initial/continued 512-token streamed HTTP chats. All tested re-entry sequences completed with finite logits. [Detailed evidence and harness snapshots](docs/performance/2026-11-08/README.md).
 
-The model still does not need enough VRAM to hold every expert layer permanently.
+End-to-end logits are not bitwise identical, including between unchanged control contexts. No model-wide quality or perplexity equivalence is claimed. Allocation-failure rollback was reviewed but not fault-injected. Validation is specific to the listed hardware and single-slot configuration; allocating a 261888-token context is not a full-length throughput test.
 
-Instead, the runtime allocates a small ring of temporary GPU buffers called expert arena slots.
+Optional compact graphs, batched D2H transfers, serial cache preparation, and pinned refill experiments remain disabled in the active launcher. The source includes the optional CUDA refill experiment, but the installed package retains the original CUDA implementation. Buffered CPU and handoff diagnostics are intended for isolated single-context measurements.
 
-For example, with three slots:
+Earlier memory-controller observations were about 25 GB/s over whole decode versus 68.43 GB/s in a synthetic read test. Whole-decode reads do not isolate CPU MoE bandwidth. Logical expert bytes are also not physical DRAM reads. GPU-source waits include execution time and cannot all be counted as removable transfer latency.
 
-GPU arena:
+## Further documentation
 
-slot 0 -> layer N expert image
-slot 1 -> layer N+1 expert image
-slot 2 -> layer N+2 expert image
+- [Server API and options](tools/server/README.md)
+- [Shared expert decode-cache design](docs/shared-expert-decode-cache.md)
+- [Inherited Flash-Next/MTP work](FLASHNEXT_MTP.md); speculative decoding is disabled in this launcher
+- [License](LICENSE)
 
-Once layer "N" finishes using slot 0, that slot becomes available for layer "N+3".
-
-Conceptually:
-
-time ------------------------------------------------------------>
-
-GPU:
-        compute L0      compute L1      compute L2      compute L3
-           |               |               |               |
-
-PCIe:
-        copy L1         copy L2         copy L3         copy L4
-
-Transfers and computation are therefore pipelined rather than serialized.
-
-Why whole expert layers are streamed
-
-The current implementation streams the complete expert image for an MoE layer:
-
-ffn_up_exps
-ffn_gate_exps
-ffn_down_exps
-
-It does not currently fetch individual routed experts on demand.
-
-That is intentional.
-
-For a large prefill micro-batch, hundreds or thousands of tokens collectively route to most or essentially all experts in the layer. Fine-grained per-expert streaming therefore provides much less benefit than it would during single-token decoding.
-
-The relevant cost becomes approximately:
-
-one full expert-layer transfer
-------------------------------
-tokens in the micro-batch
-
-A larger physical micro-batch therefore strongly improves amortization.
-
-For example:
-
-one layer transfer / 256 tokens
-
-vs.
-
-one layer transfer / 2048 tokens
-
-The second case amortizes approximately the same expert-weight traffic across eight times as many tokens.
-
-This path is intended for large prefills, not token-by-token generation.
-
-VRAM arena ring
-
-Each CUDA device receives a configurable number of arena slots.
-
-The planner assigns streamed layers to slots using a ring:
-
-slot = streamed_layer_ordinal % number_of_slots
-
-With three slots:
-
-L0 -> slot 0
-L1 -> slot 1
-L2 -> slot 2
-L3 -> slot 0
-L4 -> slot 1
-L5 -> slot 2
-...
-
-The first set of slots is filled before graph execution begins.
-
-When a layer finishes, its post-fence releases the corresponding slot and queues the next layer image that will use it.
-
-The arena therefore only needs enough VRAM for a small number of layer images rather than the complete set of offloaded experts.
-
-The slot size is determined by the largest eligible streamed layer.
-
-Asynchronous CUDA pipeline
-
-The implementation uses separate compute and transfer machinery:
-
-CUDA compute stream
-    normal model execution
-
-CUDA copy stream
-    host -> device expert transfers
-
-host worker thread
-    staging and transfer scheduling
-
-Each arena slot tracks two important CUDA events:
-
-ev_filled
-    the required expert image is ready in the slot
-
-ev_used
-    GPU compute has finished reading the slot
-
-Before an expert operation runs, a pre-fence orders the compute stream behind the corresponding fill.
-
-After the expert operation finishes, a post-fence marks the slot reusable and schedules the next fill.
-
-This prevents a new expert image from overwriting an arena slot while a CUDA kernel is still reading it.
-
-The implementation also maintains explicit release credits for reused slots rather than relying only on CUDA event state.
-
-If an expert fill fails, the engine is poisoned and execution aborts before a partially updated expert tensor can be consumed.
-
-Pinned host staging
-
-Expert tensors normally originate in pageable system memory.
-
-The streamer can stage them through pinned host memory:
-
-pageable model memory
-        |
-        | CPU memcpy
-        v
-pinned staging buffer
-        |
-        | async PCIe DMA
-        v
-GPU arena
-
-Large tensor families are divided into chunks.
-
-This permits the CPU to stage the next chunk while CUDA transfers the previous chunk:
-
-CPU staging:   [ chunk 1 ][ chunk 2 ][ chunk 3 ]
-PCIe DMA:                 [ chunk 1 ][ chunk 2 ][ chunk 3 ]
-
-Host copies are also parallelized across multiple CPU threads for sufficiently large transfers.
-
-Pinned staging is enabled by default for the streamed-expert path.
-
-QSA prefill memory fixes
-
-Moving MoE GEMMs back to the GPU only helps if sufficiently large micro-batches can fit in VRAM.
-
-QSA prefill was another source of substantial peak memory usage.
-
-Previously, the query-side QSA score graph could be constructed across the entire physical micro-batch at once:
-
-context blocks x all query tokens
-
-At large contexts and large micro-batches this can become a very large intermediate tensor.
-
-The new code supports query chunking through:
-
-QWEN4EXP_QSA_QUERY_CHUNK
-
-Instead of one monolithic query-side calculation:
-
-all queries
-    |
-    v
-huge QSA score graph
-
-the work can be split:
-
-queries   0..255
-queries 256..511
-queries 512..767
-...
-
-Each chunk is expanded into the graph before the next large score matrix is constructed.
-
-This reduces peak graph memory and makes larger prefill micro-batches practical.
-
-The QSA input path also reuses mask and bias slice identities so equivalent slices are not repeatedly uploaded as distinct graph inputs.
-
-These changes are primarily memory optimizations, but they are important to throughput because streamed-expert efficiency depends heavily on large micro-batches.
-
-Combined effect
-
-The performance path is therefore:
-
-                    OLD
-
-host-resident MoE experts
-          |
-          v
-      CPU GEMMs
-          |
-          v
- CPU / memory bottleneck
-          |
-          v
-      slow prefill
-
-versus:
-
-                    NEW
-
-host-resident MoE experts
-          |
-          v
-pinned host staging
-          |
-          | async H2D
-          v
-rotating VRAM arena <-------------------+
-          |                             |
-          v                             |
-     GPU MoE GEMMs                      |
-          |                             |
-          +---- release slot -----------+
-
-while QSA is separately chunked to keep peak VRAM usage under control.
-
-In practice:
-
-QSA memory reduction
-        |
-        v
-larger physical ubatch fits
-        |
-        v
-expert transfer amortized over more tokens
-        |
-        v
-GPU expert GEMMs stay productive
-        |
-        v
-~400 tok/s-class large-prefill throughput
-on the target system
-
-Runtime options
-
-Enable expert streaming:
-
---fn-stream-experts
-
-Number of arena slots per GPU:
-
---fn-stream-slots N
-
-The default is 3.
-
-Two or more slots allow expert transfers to overlap execution.
-
-Minimum micro-batch size that uses streaming:
-
---fn-stream-min-tokens N
-
-The default is 1024 tokens.
-
-Smaller micro-batches stay on the normal path.
-
-Enable or disable pinned staging:
-
---fn-stream-pin
---no-fn-stream-pin
-
-Set a per-GPU arena VRAM ceiling:
-
---fn-stream-budget-mib N
-
-"0" selects the budget automatically from available VRAM.
-
-The automatic path reserves additional memory for the rest of the graph rather than consuming all reported free VRAM.
-
-Multi-GPU arena placement
-
-The arena does not necessarily have to live on the same GPU as the rest of a layer.
-
-Three placement modes are available.
-
-Layer-local
-
---fn-stream-gpu-mode layer
-
-Each expert arena lives on the device that owns the corresponding layer.
-
-This is the default.
-
-Primary GPU
-
---fn-stream-gpu-mode primary
---fn-stream-arena-device N
-
-Streamed experts can be concentrated on one GPU.
-
-The expert GEMM then executes on that GPU.
-
-Instead of moving the entire expert image between GPUs, the smaller activation tensors cross the device boundary.
-
-Weighted split
-
---fn-stream-gpu-mode split
---fn-stream-gpu-split W0,W1,...
-
-Streamed expert layers are distributed across CUDA devices according to byte weights.
-
-For example:
-
---fn-stream-gpu-split 4,1
-
-targets roughly four times as much streamed expert traffic at device 0 as device 1.
-
-QSA query chunking
-
-The QSA prefill query chunk can be limited with:
-
-QWEN4EXP_QSA_QUERY_CHUNK=256
-
-The appropriate value depends on context size, physical micro-batch size, and available VRAM.
-
-This is primarily a memory-control mechanism rather than a direct arithmetic optimization.
-
-MTP micro-batch limit
-
-The same recent patch also adds:
-
-LLAMA_MTP_UBATCH=N
-
-which allows the MTP context to use a lower physical micro-batch limit than the target context when needed for memory control.
-
-This is separate from the streamed-expert speedup itself.
-
-Eligibility
-
-A layer is currently streamable when its expert tensors satisfy the implementation's supported layout.
-
-In particular, the current path expects:
-
-- separate up, gate, and down expert tensor families,
-- all three families to be present,
-- host-resident expert storage,
-- contiguous expert tensors,
-- no unsupported per-expert bias tensors,
-- no unsupported per-expert scale tensors,
-- no fused gate/up expert representation,
-- and a CUDA device associated with the layer.
-
-Experts already resident on the GPU are left alone.
-
-When streaming cannot be applied, the code falls back to the existing path rather than constructing a partial arena configuration.
-
-Current limitation
-
-The streamer operates at whole-MoE-layer granularity.
-
-An arena slot must therefore be large enough to hold the largest complete streamed expert layer:
-
-up experts
-+ gate experts
-+ down experts
-+ backend alignment / padding
-
-This can still require a substantial amount of temporary VRAM.
-
-A future per-expert or grouped-expert streamer could reduce the minimum arena size and potentially reduce PCIe traffic for smaller batches, but the present design is deliberately optimized around large prefills where nearly all experts are active across the batch.
-
-Telemetry
-
-The streamer reports per-micro-batch statistics including:
-
-expert fills
-H2D bytes
-staging bytes
-pre/post fence counts
-slot wait time
-host staging time
-copy submission time
-errors
-number of devices
-achieved H2D bandwidth
-
-This makes it possible to distinguish whether a run is limited by:
-
-PCIe bandwidth
-host staging bandwidth
-arena starvation
-GPU expert compute
-or other model work
-
-rather than inferring the bottleneck from total tokens/sec alone.
-
-Summary
-
-The recent prefill optimization does not make the model smaller and does not permanently move the offloaded experts into VRAM.
-
-It changes how offloaded MoE computation is executed.
-
-Instead of:
-
-system RAM weights -> CPU expert computation
-
-it uses:
-
-system RAM weights
-        ->
-asynchronous streamed layer image
-        ->
-temporary VRAM arena
-        ->
-GPU expert computation
-
-with transfers pipelined against GPU execution.
-
-At the same time, QSA prefill is chunked to reduce peak memory so the large physical micro-batches needed to amortize those transfers can actually fit.
-
-That combination is what moved the target system into the approximately 400 tok/s prefill range..md)
-- [Completions](docs/completions.md)
-- [Models](docs/models.md)
-- [Release process](docs/release.md)
-
-## Contributing
-
-- Contributors can open PRs
-- Collaborators will be invited based on contributions
-- Maintainers can push to branches in the `llama.cpp` repo and merge PRs into the `master` branch
-- Any help with managing issues, PRs and projects is very appreciated!
-- Read the [CONTRIBUTING.md](CONTRIBUTING.md) for more information
-
-## Acknowledgements
-
-- [yhirose/cpp-httplib](https://github.com/yhirose/cpp-httplib) - Single-header HTTP server, used by `llama-server` - MIT license
-- [nothings/stb](https://github.com/nothings/stb) - Single-header image format decoder, used by multimodal subsystem - Public domain
-- [nlohmann/json](https://github.com/nlohmann/json) - Single-header JSON library, used by various tools/examples - MIT License
-- [mackron/miniaudio](https://github.com/mackron/miniaudio) - Single-header audio format decoder, used by multimodal subsystem - Public domain
-- [sheredom/subprocess.h](https://github.com/sheredom/subprocess.h) - Single-header process launching solution for C and C++ - Public domain
+Based on llama.cpp and the Flash-Next fork. This repository records a hardware-specific optimization and its measured limitations.

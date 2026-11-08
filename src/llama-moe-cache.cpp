@@ -7,9 +7,11 @@
 #include <algorithm>
 #include <array>
 #include <cinttypes>
+#include <cstdlib>
 #include <cstring>
 #include <deque>
 #include <limits>
+#include <map>
 #include <numeric>
 #include <stdexcept>
 #include <vector>
@@ -91,6 +93,7 @@ struct cache_scratch_span {
     ggml_backend_buffer_t buffer = nullptr;
     char * base = nullptr;
     size_t bytes = 0;
+    int device = -1;
 };
 }
 
@@ -100,8 +103,7 @@ struct llama_moe_cache {
     ggml_context * context = nullptr;
     std::vector<cache_layer_state> layers;
     std::vector<cache_scratch_span> scratch;
-    void * quant_scratch = nullptr;
-    int device = -1;
+    std::map<int, void *> quant_scratch;
     bool cache_mode = false;
     bool active = false;
     bool failed = false;
@@ -139,7 +141,7 @@ void cache_poll(llama_moe_cache & cache, bool wait) {
             if (!entry.pending) {
                 continue;
             }
-            const int state = llama_moe_stream_cache_query(cache.stream, cache.device, entry.pending, wait);
+            const int state = llama_moe_stream_cache_query(cache.stream, layer.bind.device, entry.pending, wait);
             if (state < 0) {
                 cache_failure(cache, "MoE cache expert copy failed");
             }
@@ -196,8 +198,8 @@ void cache_zero_dummy(llama_moe_cache & cache) {
                 clear.tag = cache.next_tag++;
                 clear.dst[0] = static_cast<char *>(bank->data) + ggml_nbytes(bank);
                 clear.nbytes[0] = pad;
-                if (!llama_moe_stream_cache_submit(cache.stream, cache.device, clear) ||
-                    llama_moe_stream_cache_query(cache.stream, cache.device, clear.tag, true) != 1) {
+                if (!llama_moe_stream_cache_submit(cache.stream, layer.bind.device, clear) ||
+                    llama_moe_stream_cache_query(cache.stream, layer.bind.device, clear.tag, true) != 1) {
                     cache_failure(cache, "MoE cache padding clear failed");
                 }
             }
@@ -216,7 +218,7 @@ bool cache_submit(llama_moe_cache & cache, cache_layer_state & layer, int slot, 
         copy.dst[f] = static_cast<char *>(layer.bind.bank[f]->data) + size_t(slot) * layer.bind.bank[f]->nb[2];
         copy.nbytes[f] = layer.source[f]->nb[2];
     }
-    if (!llama_moe_stream_cache_submit(cache.stream, cache.device, copy)) {
+    if (!llama_moe_stream_cache_submit(cache.stream, layer.bind.device, copy)) {
         cache_failure(cache, "MoE cache admission submission failed");
     }
     auto & entry = layer.entries[slot];
@@ -262,7 +264,10 @@ void cache_seed(llama_moe_cache & cache) {
 
 llama_moe_cache * llama_moe_cache_create(const llama_model & model, llama_moe_stream * stream,
                                         const llama_moe_cache_params & params) {
-    if (!params.enable || model.arch != LLM_ARCH_QWEN4EXP || !stream || !stream->enabled || stream->devices.size() != 1 ||
+    const char * multi_env = std::getenv("LLAMA_MOE_CACHE_MULTI_GPU");
+    const bool multi = params.multi_device || (multi_env && std::strcmp(multi_env, "1") == 0);
+    if (!params.enable || model.arch != LLM_ARCH_QWEN4EXP || !stream || !stream->enabled || stream->devices.empty() ||
+        (!multi && stream->devices.size() != 1) ||
         stream->extents.empty() || params.slots_per_layer < 1 || params.slots_per_layer > 511 ||
         params.warm_rows < 1 || params.warm_rows > 256 || params.max_rows < 1 || params.max_rows > 49) {
         return nullptr;
@@ -270,25 +275,35 @@ llama_moe_cache * llama_moe_cache_create(const llama_model & model, llama_moe_st
     auto * cache = new llama_moe_cache;
     cache->stream = stream;
     cache->params = params;
-    cache->device = stream->devices.front();
     cache->layers.resize(model.layers.size());
-    std::vector<llama_moe_plan::cache_layer> sources;
-    std::vector<uint64_t> extents;
-    for (const auto & extent : stream->extents) {
-        if (extent.device != cache->device || !extent.base || !extent.buffer) {
+    std::map<int, std::vector<llama_moe_plan::cache_layer>> sources;
+    std::map<int, std::vector<uint64_t>> extents;
+    std::map<int, std::vector<size_t>> extent_indices;
+    std::map<ggml_backend_buffer_t, int> buffer_devices;
+    for (size_t i = 0; i < stream->extents.size(); ++i) {
+        const auto & extent = stream->extents[i];
+        if (!extent.base || !extent.buffer || extent.usable_bytes <= cache_scratch_bytes ||
+            std::find(stream->devices.begin(), stream->devices.end(), extent.device) == stream->devices.end()) {
             delete cache;
             return nullptr;
         }
-        extents.push_back(extent.usable_bytes);
+        extents[extent.device].push_back(extent.usable_bytes);
+        extent_indices[extent.device].push_back(i);
+        buffer_devices[extent.buffer] = extent.device;
     }
-    const auto buft = ggml_backend_buffer_get_type(stream->extents.front().buffer);
-    const auto device = ggml_backend_buft_get_device(buft);
     const auto cpu = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_CPU);
     for (size_t il = 0; il < model.layers.size(); ++il) {
         llama_moe_stream_layer_bind streamed;
         if (!llama_moe_stream_bind(stream, int(il), streamed)) {
             continue;
         }
+        const auto owner = buffer_devices.find(streamed.arena[0]->buffer);
+        if (owner == buffer_devices.end()) {
+            delete cache;
+            return nullptr;
+        }
+        const auto buft = ggml_backend_buffer_get_type(streamed.arena[0]->buffer);
+        const auto device = ggml_backend_buft_get_device(buft);
         auto & layer = cache->layers[il];
         layer.source[0] = model.layers[il].ffn_up_exps;
         layer.source[1] = model.layers[il].ffn_gate_exps;
@@ -324,14 +339,28 @@ llama_moe_cache * llama_moe_cache_create(const llama_model & model, llama_moe_st
         layer.bind.host_slots = layer.map.data();
         layer.bind.n_expert = n_expert;
         layer.bind.capacity = params.slots_per_layer;
-        layer.bind.device = cache->device;
-        sources.push_back(source);
+        layer.bind.device = owner->second;
+        sources[owner->second].push_back(source);
     }
-    const auto plan = llama_moe_plan::plan_cache(sources, extents, params.slots_per_layer, cache_scratch_bytes);
-    if (!plan.enabled) {
-        LLAMA_LOG_WARN("moe_cache: %s; using baseline\n", plan.reason.c_str());
+    if (sources.empty()) {
         delete cache;
         return nullptr;
+    }
+    llama_moe_plan::cache_plan plan;
+    for (const auto & item : sources) {
+        auto local = llama_moe_plan::plan_cache(item.second, extents.at(item.first), params.slots_per_layer, cache_scratch_bytes);
+        if (!local.enabled) {
+            LLAMA_LOG_WARN("moe_cache: device %d: %s; using baseline\n", item.first, local.reason.c_str());
+            delete cache;
+            return nullptr;
+        }
+        for (auto bank : local.banks) {
+            bank.extent = int(extent_indices.at(item.first).at(bank.extent));
+            plan.banks.push_back(bank);
+        }
+        plan.bank_bytes += local.bank_bytes;
+        LLAMA_LOG_INFO("moe_cache: device %d, %zu layers, %d slots/layer, %.2f MiB banks\n",
+                       item.first, local.banks.size(), params.slots_per_layer, local.bank_bytes / 1048576.0);
     }
     ggml_init_params init{};
     init.mem_size = (16u << 10) + plan.banks.size() * 4 * ggml_tensor_overhead();
@@ -344,15 +373,20 @@ llama_moe_cache * llama_moe_cache_create(const llama_model & model, llama_moe_st
     for (size_t i = 0; i < stream->extents.size(); ++i) {
         const auto & extent = stream->extents[i];
         const size_t offset = (extent.usable_bytes - cache_scratch_bytes) & ~(cache_alignment - 1);
-        cache->scratch.push_back({extent.buffer, static_cast<char *>(extent.base) + offset, cache_scratch_bytes});
+        cache->scratch.push_back({extent.buffer, static_cast<char *>(extent.base) + offset, cache_scratch_bytes, extent.device});
+        if (!cache->quant_scratch.count(extent.device)) {
+            auto & span = cache->scratch.back();
+            cache->quant_scratch[extent.device] = span.base;
+            span.base += cache_quant_bytes;
+            span.bytes -= cache_quant_bytes;
+        }
     }
-    cache->quant_scratch = cache->scratch.front().base;
-    cache->scratch.front().base += cache_quant_bytes;
-    cache->scratch.front().bytes -= cache_quant_bytes;
     bool ok = true;
     for (const auto & bank_plan : plan.banks) {
         auto & layer = cache->layers[bank_plan.il];
         const auto & extent = stream->extents[bank_plan.extent];
+        GGML_ASSERT(extent.device == layer.bind.device);
+        const auto buft = ggml_backend_buffer_get_type(extent.buffer);
         for (int f = 0; f < 3; ++f) {
             const auto * source = layer.source[f];
             auto * bank = ggml_new_tensor_3d(cache->context, source->type, source->ne[0], source->ne[1], params.slots_per_layer + 1);
@@ -380,8 +414,8 @@ llama_moe_cache * llama_moe_cache_create(const llama_model & model, llama_moe_st
         delete cache;
         return nullptr;
     }
-    LLAMA_LOG_INFO("moe_cache: device %d, %zu layers, %d slots/layer, %zu experts, %.2f MiB banks, %zu MiB scratch\n",
-                   cache->device, plan.banks.size(), params.slots_per_layer,
+    LLAMA_LOG_INFO("moe_cache: %zu devices, %zu layers, %d slots/layer, %zu experts, %.2f MiB banks, %zu MiB scratch\n",
+                   sources.size(), plan.banks.size(), params.slots_per_layer,
                    plan.banks.size() * params.slots_per_layer, plan.bank_bytes / 1048576.0,
                    stream->extents.size() * (cache_scratch_bytes >> 20));
     return cache;
@@ -399,6 +433,35 @@ void llama_moe_cache_destroy(llama_moe_cache * cache) {
         ggml_free(cache->context);
     }
     delete cache;
+}
+
+llama_moe_cache_prompt_state llama_moe_cache_save_prompt(const llama_moe_cache * cache) {
+    llama_moe_cache_prompt_state state;
+    if (cache) {
+        state.resize(cache->layers.size());
+        for (size_t i = 0; i < state.size(); ++i) {
+            state[i].assign(cache->layers[i].prompt.begin(), cache->layers[i].prompt.end());
+        }
+    }
+    return state;
+}
+
+bool llama_moe_cache_restore_prompt(llama_moe_cache * cache, const llama_moe_cache_prompt_state & state) {
+    if (!cache || cache->cache_mode || state.size() != cache->layers.size()) {
+        return false;
+    }
+    for (size_t i = 0; i < state.size(); ++i) {
+        if (state[i].size() > size_t(cache->params.warm_rows)) return false;
+        for (const auto & row : state[i]) {
+            for (int32_t expert : row) {
+                if (expert < 0 || expert >= cache->layers[i].bind.n_expert) return false;
+            }
+        }
+    }
+    for (size_t i = 0; i < state.size(); ++i) {
+        cache->layers[i].prompt.assign(state[i].begin(), state[i].end());
+    }
+    return true;
 }
 
 bool llama_moe_cache_prepare(llama_moe_cache * cache, int64_t n_tokens, bool prefill) {
@@ -438,8 +501,10 @@ bool llama_moe_cache_prepare(llama_moe_cache * cache, int64_t n_tokens, bool pre
         cache->cache_mode = true;
         ++cache->generation;
         cache_invalidate(*cache);
-        if (!llama_moe_stream_cache_set_scratch(cache->stream, cache->device, cache->quant_scratch, cache_quant_bytes)) {
-            cache_failure(*cache, "MoE cache scratch binding failed");
+        for (const auto & scratch : cache->quant_scratch) {
+            if (!llama_moe_stream_cache_set_scratch(cache->stream, scratch.first, scratch.second, cache_quant_bytes)) {
+                cache_failure(*cache, "MoE cache scratch binding failed");
+            }
         }
         cache_zero_dummy(*cache);
         cache_seed(*cache);
@@ -615,15 +680,28 @@ bool llama_moe_cache_failed(const llama_moe_cache * cache) {
     return cache && cache->failed;
 }
 
-size_t llama_moe_cache_scratch_capacity(const llama_moe_cache * cache, size_t extent) {
-    return cache && extent < cache->scratch.size() ? cache->scratch[extent].bytes : 0;
+static const cache_scratch_span * cache_scratch_on_device(const llama_moe_cache * cache, int device, size_t extent) {
+    if (cache) {
+        for (const auto & span : cache->scratch) {
+            if (span.device == device && extent-- == 0) {
+                return &span;
+            }
+        }
+    }
+    return nullptr;
 }
 
-bool llama_moe_cache_scratch_bind(llama_moe_cache * cache, ggml_tensor * tensor, size_t extent, size_t offset) {
-    if (!cache || !tensor || extent >= cache->scratch.size() || offset % cache_alignment) {
+size_t llama_moe_cache_scratch_capacity(const llama_moe_cache * cache, int device, size_t extent) {
+    const auto * span = cache_scratch_on_device(cache, device, extent);
+    return span ? span->bytes : 0;
+}
+
+bool llama_moe_cache_scratch_bind(llama_moe_cache * cache, ggml_tensor * tensor, int device, size_t extent, size_t offset) {
+    const auto * found = cache_scratch_on_device(cache, device, extent);
+    if (!found || !tensor || offset % cache_alignment) {
         return false;
     }
-    const auto & span = cache->scratch[extent];
+    const auto & span = *found;
     const size_t bytes = ggml_backend_buft_get_alloc_size(ggml_backend_buffer_get_type(span.buffer), tensor);
     if (offset > span.bytes || bytes > span.bytes - offset) {
         return false;

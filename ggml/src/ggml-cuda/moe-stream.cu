@@ -22,6 +22,7 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <cstdlib>
 #include <cstring>
 #include <deque>
 #include <map>
@@ -116,6 +117,8 @@ struct fn_engine {
     std::map<uint64_t, fn_cache_completion> cache_done;
     void *                  cache_scratch = nullptr;
     size_t                  cache_scratch_bytes = 0;
+    bool                    cache_pipeline = false;
+    size_t                  cache_pin_pos = 0;
 
     ggml_cuda_moe_stream_stats st;
 };
@@ -178,10 +181,28 @@ struct fn_worker_done {
 };
 
 void worker_cache_copy(fn_engine * e, const ggml_cuda_moe_cache_copy & copy) {
-    // Reuse one pinned mirror only after its previous DMA has completed.
-    cudaError_t err = cudaStreamSynchronize(e->copy_stream);
     char * pin = e->slots[0].pin;
     const size_t cap = e->slots[0].cap;
+    // Reserve disjoint staging spans across jobs. A wrap waits for every DMA
+    // referencing this ring before any host byte is overwritten. Phase changes
+    // drain this stream and reset the cursor while the worker is parked.
+    const size_t ring_cap = std::min(cap, size_t(128) << 20);
+    size_t staged_bytes = 0;
+    bool pipeline = e->cache_pipeline && pin;
+    for (int f = 0; pipeline && f < GGML_MOE_STREAM_MAX_FAMILIES; ++f) {
+        if (copy.host[f]) {
+            if (copy.nbytes[f] > ring_cap - staged_bytes) {
+                pipeline = false;
+            } else {
+                staged_bytes += copy.nbytes[f];
+            }
+        }
+    }
+    cudaError_t err = cudaSuccess;
+    if (!pipeline || staged_bytes > ring_cap - e->cache_pin_pos) {
+        err = cudaStreamSynchronize(e->copy_stream);
+        e->cache_pin_pos = 0;
+    }
     for (int f = 0; err == cudaSuccess && f < GGML_MOE_STREAM_MAX_FAMILIES; ++f) {
         char * dst = static_cast<char *>(copy.dst[f]);
         const char * src = static_cast<const char *>(copy.host[f]);
@@ -190,6 +211,11 @@ void worker_cache_copy(fn_engine * e, const ggml_cuda_moe_cache_copy & copy) {
             err = cudaMemsetAsync(dst, 0, remaining, e->copy_stream);
         } else if (remaining && !pin) {
             err = cudaMemcpyAsync(dst, src, remaining, cudaMemcpyHostToDevice, e->copy_stream);
+        } else if (remaining && pipeline) {
+            char * staging = pin + e->cache_pin_pos;
+            std::memcpy(staging, src, remaining);
+            err = cudaMemcpyAsync(dst, staging, remaining, cudaMemcpyHostToDevice, e->copy_stream);
+            e->cache_pin_pos += remaining;
         } else {
             while (remaining && err == cudaSuccess) {
                 const size_t chunk = std::min(remaining, cap);
@@ -892,6 +918,9 @@ int ggml_cuda_moe_stream_mode_impl(int device, uint64_t owner, int mode) {
     e->pause = mode == 2;
     e->cache_scratch = nullptr;
     e->cache_scratch_bytes = 0;
+    e->cache_pin_pos = 0;
+    const char * pipeline = std::getenv("GGML_CUDA_CACHE_PIPELINE");
+    e->cache_pipeline = pipeline && std::strcmp(pipeline, "1") == 0;
     e->cv_fill.notify_all();
     return 0;
 }

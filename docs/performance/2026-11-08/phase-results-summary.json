@@ -1,0 +1,21 @@
+{
+  "False": {
+    "tps": 23.672160713094197,
+    "prefill_us": 18313375,
+    "first_decode_us": 687141,
+    "prefill_plus_first_decode_us": 19000516,
+    "all320_decode_tps": 21.97475395733953,
+    "reentry_prefill_s": 9.1398425
+  },
+  "True": {
+    "tps": 27.429442322289994,
+    "prefill_us": 18175756.5,
+    "first_decode_us": 2664844.5,
+    "prefill_plus_first_decode_us": 20840601,
+    "all320_decode_tps": 21.915390133163065,
+    "reentry_prefill_s": 10.5687575
+  },
+  "gain_pct": 15.872153179145432,
+  "incremental_transition_s": 1.9777035,
+  "amortization_tokens": 341.7765911881265
+}

@@ -1,0 +1,21 @@
+{
+  "launcher": "G:\\qwenllamaMTP\\perf-20260911\\bench\\flashnext-stream-prefill\\launch-best-decode-no-draft-think-guard.ps1",
+  "launcher_sha256": "8c2ba18dd610ff9150a301710e3586ef5aaa14f632d9dcdc2c01d3c6ab0daa9d",
+  "rollback_launcher": "G:\\qwenllamaMTP\\perf-20260911\\bench\\flashnext-stream-prefill\\launch-best-decode-no-draft-think-guard.pre-phase-20261108.ps1",
+  "rollback_sha256": "e219391c12cf85afb6d79f3d1f7543d9e758e2656b718620330c67577ae32223",
+  "release": "G:\\qwenllamaMTP\\perf-20260911\\dist\\fn-fast-prefill-local-decode-20261108\\bin",
+  "files": {
+    "ggml-base.dll": "f9bf3c00572f7746e63bbc337af4e9413a5c665ca3e462d84cd5795dd810ace5",
+    "ggml-cpu.dll": "127b5c65cf4ea31c3fa0ecfb96bff676ddbed83550962728e7fb7553e34e32ad",
+    "ggml-cuda.dll": "71f27d7d66e4ba08d8bea744fe9f083a299374631b11811000cd3e4f06c83f7a",
+    "ggml.dll": "d474fe16bdbf528944e88a4986c3c1f66a24d2c5482e41c7c586530533d64319",
+    "llama-common.dll": "9208d66e60eae0961a69523f13d2f415af850d744d2ec7098fb5968d1da67db7",
+    "llama-server-impl.dll": "a8a0199acb7af664a5afd8116e0b3d9df95d7fb8ec1cf4a48f6aead1dfb1a854",
+    "llama-server.exe": "2131625bf115e73f8b4efd71226b97ed79a46ce01c8e9a5ed93019e3eb729c9b",
+    "llama.dll": "cada5f6579f8c4623dee4a88afa716642c0799ec3a25b0ec1a966f4f8efad5de",
+    "mtmd.dll": "a813ba72ca7384c69345d798a88533bdf4147e633488aed932ae9e01df9dfea4"
+  },
+  "candidate_manifest_sha256": "e865b5c2e2698eb1001b98fa8445689ea1e972cb51ccbf31bd61adeffe779ca0",
+  "phase_validation": "G:\\qwenllamaMTP\\perf-20260911\\bench\\decode-optimization-20261108\\server-smoke-phase-512\\validation.json",
+  "baseline_validation": "G:\\qwenllamaMTP\\perf-20260911\\bench\\decode-optimization-20261108\\server-smoke-baseline-512\\validation.json"
+}

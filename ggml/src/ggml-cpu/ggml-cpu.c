@@ -1468,6 +1468,77 @@ struct mmid_row_mapping {
     int32_t i2;
 };
 
+static bool ggml_cpu_moe_n1 = false; // initialized once in ggml_cpu_init()
+
+static bool ggml_compute_forward_mul_mat_id_n1(
+        const struct ggml_compute_params * params,
+              struct ggml_tensor * dst) {
+#if defined(__AVX2__)
+    const struct ggml_tensor * src0 = dst->src[0];
+    const struct ggml_tensor * src1 = dst->src[1];
+    const struct ggml_tensor * ids  = dst->src[2];
+
+    if (!ggml_cpu_moe_n1 || params->use_ref || ggml_is_numa() || dst->op != GGML_OP_MUL_MAT_ID_MASKED ||
+        src1->type != GGML_TYPE_F32 || src0->ne[3] != 1 ||
+        ids->ne[0] != 10 || ids->ne[1] != 1 || ids->ne[2] != 1 || ids->ne[3] != 1 ||
+        (src1->ne[1] != 1 && src1->ne[1] != 10) || src1->ne[2] != 1 || src1->ne[3] != 1 ||
+        (src0->type != GGML_TYPE_Q4_K && src0->type != GGML_TYPE_Q5_K &&
+         src0->type != GGML_TYPE_Q5_1 && src0->type != GGML_TYPE_Q8_0)) {
+        return false;
+    }
+
+    const int ith = params->ith;
+    const int nth = params->nth;
+    const int32_t * resident = (const int32_t *) dst->src[3]->data;
+    int slots[10];
+    int experts[10];
+    int n_active = 0;
+    for (int slot = 0; slot < 10; ++slot) {
+        const int32_t expert = *(const int32_t *) ((const char *) ids->data + slot*ids->nb[0]);
+        GGML_ASSERT(expert >= 0 && expert < src0->ne[2]);
+        GGML_ASSERT(resident[expert] >= 0);
+        if (resident[expert] > 0) {
+            if (ith == 0) {
+                memset((char *) dst->data + slot*dst->nb[1], 0, dst->ne[0]*sizeof(float));
+            }
+        } else {
+            slots[n_active] = slot;
+            experts[n_active++] = expert;
+        }
+    }
+
+    if (ith == 0) {
+        atomic_store_explicit(&params->threadpool->current_chunk, nth, memory_order_relaxed);
+    }
+    ggml_barrier(params->threadpool);
+
+    const ggml_vec_dot_t vec_dot = type_traits_cpu[src0->type].vec_dot;
+    const size_t row_size = ggml_row_size(type_traits_cpu[src0->type].vec_dot_type, src1->ne[0]);
+    const int64_t tile_rows = src0->ne[0] >= 1024 ? 32 : 64;
+    const int64_t n_tiles = (dst->ne[0] + tile_rows - 1) / tile_rows;
+    const int64_t n_chunks = n_tiles*n_active;
+
+    // Share tiles across all active routes so faster cores can take more rows.
+    for (int64_t chunk = ith; chunk < n_chunks;
+         chunk = atomic_fetch_add_explicit(&params->threadpool->current_chunk, 1, memory_order_relaxed)) {
+        const int route = chunk / n_tiles;
+        const int64_t row_begin = (chunk % n_tiles)*tile_rows;
+        const int64_t row_end = MIN(row_begin + tile_rows, dst->ne[0]);
+        const char * weights = (const char *) src0->data + experts[route]*src0->nb[2];
+        const char * input = (const char *) params->wdata + (slots[route] % src1->ne[1])*row_size;
+        float * output = (float *) ((char *) dst->data + slots[route]*dst->nb[1]);
+        for (int64_t row = row_begin; row < row_end; ++row) {
+            vec_dot(src0->ne[0], output + row, 0, weights + row*src0->nb[1], 0, input, 0, 1);
+        }
+    }
+    return true;
+#else
+    GGML_UNUSED(params);
+    GGML_UNUSED(dst);
+    return false;
+#endif
+}
+
 static void ggml_compute_forward_mul_mat_id_one_chunk(
     struct ggml_tensor * dst,
     const struct ggml_tensor * src0,
@@ -1642,6 +1713,10 @@ static void ggml_compute_forward_mul_mat_id(
             }
         }
 #endif
+    }
+
+    if (ggml_compute_forward_mul_mat_id_n1(params, dst)) {
+        return;
     }
 
     if (ith == 0) {
@@ -3123,6 +3198,8 @@ static int ggml_cpu_try_fuse_ops(
     return 0;
 }
 
+#include "cpu-op-profile.h"
+
 static thread_ret_t ggml_graph_compute_thread(void * data) {
     struct ggml_compute_state * state = (struct ggml_compute_state *) data;
     struct ggml_threadpool    * tp    = state->threadpool;
@@ -3151,6 +3228,10 @@ static thread_ret_t ggml_graph_compute_thread(void * data) {
     GGML_PRINT_DEBUG("thread #%d compute-start cplan %p last-graph %d\n", state->ith, (const void *)cplan, state->last_graph);
 #endif
 
+    if (state->ith == 0) diag_cpu_init();
+    struct diag_cpu_record * diag_pending = NULL;
+    struct ggml_tensor * diag_pending_node = NULL;
+
     for (int node_n = 0; node_n < cgraph->n_nodes && atomic_load_explicit(&tp->abort, memory_order_relaxed) != node_n; node_n++) {
         struct ggml_tensor * node = cgraph->nodes[node_n];
 
@@ -3165,12 +3246,15 @@ static thread_ret_t ggml_graph_compute_thread(void * data) {
 
         // TODO: move fused-op detection into ggml_graph_plan so fusion decisions are made once at planning time
         // Try fused ops, fall back to normal compute
+        struct diag_cpu_record * diag_rec = state->ith == 0 ? diag_cpu_begin(node, params.nth) : NULL;
         const int n_fused = ggml_cpu_try_fuse_ops(cgraph, node_n, &params, cplan);
         if (n_fused > 0) {
             node_n += n_fused;
         } else {
             ggml_compute_forward(&params, node);
         }
+
+        if (diag_rec) { diag_rec->compute_us = diag_cpu_now(); diag_rec->fused = n_fused; }
 
         if (state->ith == 0 && cplan->abort_callback &&
                 cplan->abort_callback(cplan->abort_callback_data)) {
@@ -3180,6 +3264,10 @@ static thread_ret_t ggml_graph_compute_thread(void * data) {
 
         if (node_n + 1 < cgraph->n_nodes) {
             ggml_barrier(state->threadpool);
+            diag_cpu_end(diag_rec, node);
+        } else {
+            diag_pending = diag_rec;
+            diag_pending_node = node;
         }
     }
 
@@ -3190,6 +3278,8 @@ static thread_ret_t ggml_graph_compute_thread(void * data) {
 #endif
 
     ggml_barrier(state->threadpool);
+    diag_cpu_end(diag_pending, diag_pending_node);
+    if (state->ith == 0) diag_cpu_maybe_flush();
 
 #ifdef GGML_USE_CPU_RISCV64_SPACEMIT
     ggml_backend_cpu_riscv64_spacemit_clear_numa_thread_affinity_threaded(state->ith);
@@ -3952,6 +4042,11 @@ void ggml_cpu_init(void) {
         {
             const char * env = getenv("GGML_CPU_DISABLE_FUSION");
             ggml_cpu_disable_fusion = (env != NULL && atoi(env) == 1);
+        }
+
+        {
+            const char * env = getenv("GGML_CPU_MOE_N1");
+            ggml_cpu_moe_n1 = (env != NULL && strcmp(env, "1") == 0);
         }
 
         is_first_call = false;

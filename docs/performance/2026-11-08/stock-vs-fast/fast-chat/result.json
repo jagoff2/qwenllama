@@ -1,0 +1,24 @@
+{
+  "case": "fast",
+  "version": "version: 0.4.0-dev (build 1152, commit 9eda97a9b)\nbuilt with MSVC 19.37.32822.0 for Windows AMD64",
+  "startup_s": 17.3434297000058,
+  "request_s": 14.86536609986797,
+  "timings": {
+    "cache_n": 0,
+    "prompt_n": 944,
+    "prompt_ms": 5633.522,
+    "prompt_per_token_ms": 5.967713983050848,
+    "prompt_per_second": 167.5683524445276,
+    "predicted_n": 192,
+    "predicted_ms": 9211.734,
+    "predicted_per_token_ms": 48.228973821989534,
+    "predicted_per_second": 20.73442415944707
+  },
+  "first_token_s": 5.653265899978578,
+  "first_decode_gap_s": 2.243075800128281,
+  "steady_from_token": 64,
+  "steady_to_token": 192,
+  "steady_tps": 27.776059859720846,
+  "tokens": [],
+  "content": "We need answer user's request. Need produce final answer: detailed technical tutorial at least 1500 words, start immediately. Need cover memory bandwidth, arithmetic intensity, cache admission, synchronization, thread counts, prefill versus decode, measurement methodology, numerical correctness. Use concrete examples and equations. The observations repeated identical. Need explain performance of system: large MoE LLM using system RAM and two GPUs. Most expert weights in system RAM because don't fit in graphics memory. Every token selects small subset experts per layer. CPU evaluates experts not resident on GPU. Expert cache can reduce CPU work but requires copies, sync, buffer lifetimes. Prompt processing batches many tokens, single token generation little work per operation.\n\nNeed likely discuss MoE offloading, CPU-GPU, PCIe/NVLink? Two graphics cards maybe each has memory, system RAM. Need explain performance bottlenecks: memory bandwidth vs compute, arithmetic intensity roofline, expert cache"
+}

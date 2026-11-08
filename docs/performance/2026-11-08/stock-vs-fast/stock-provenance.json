@@ -1,0 +1,36 @@
+{
+  "archive": "C:\\Users\\user\\Downloads\\llama-b10870-bin-win-cuda-13.3-x64.zip",
+  "install": "C:\\Users\\user\\qwenllama",
+  "build": "b10870",
+  "commit": "1945e092030f8668ff93382799502d01490e564d",
+  "files": {
+    "llama-server.exe": {
+      "sha256": "52a5d365bf8443de0e7e5af3bf4f6de228916225726ce85fe989672ed2bd0c26",
+      "matches_release_archive": true
+    },
+    "llama-server-impl.dll": {
+      "sha256": "63c346a9f7050a232089bc5f176da7e9a7df351ce4c67718284e6b925e81adf0",
+      "matches_release_archive": true
+    },
+    "llama.dll": {
+      "sha256": "f8c198760b634cf1674f893b65ab86251de409faeeb9be83a9ecbef21bc36d1c",
+      "matches_release_archive": true
+    },
+    "ggml-base.dll": {
+      "sha256": "c9e667134c39253e48172774792e9092c9b6f50d623eac9b46044db755950a38",
+      "matches_release_archive": true
+    },
+    "ggml-cuda.dll": {
+      "sha256": "ae7b79a909e0de0e564049b2fd7fcf86cd76f252f820e4d10a08ddf40ba74a3e",
+      "matches_release_archive": true
+    },
+    "ggml-cpu-alderlake.dll": {
+      "sha256": "e673f1b78cdf752ef70be148aed2c387ff4777ed7555b17d8596e27ba31f0a01",
+      "matches_release_archive": true
+    },
+    "llama-common.dll": {
+      "sha256": "3d02f6c124f17007d1b1b164fb1560e8080d172962e4db5590ccd75214978483",
+      "matches_release_archive": true
+    }
+  }
+}

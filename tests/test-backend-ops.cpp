@@ -5123,8 +5123,9 @@ struct test_mul_mat_id_masked : public test_mul_mat_id {
     const int mask_mode;
     std::vector<float> unmasked;
 
-    test_mul_mat_id_masked(ggml_type type, int64_t rows, bool broadcast, int mask_mode)
-        : test_mul_mat_id(type, GGML_TYPE_F32, 16, 4, broadcast, 64, rows, 512), mask_mode(mask_mode) {}
+    test_mul_mat_id_masked(ggml_type type, int64_t rows, bool broadcast, int mask_mode,
+            int n_used = 4, int64_t m = 64, int64_t k = 512)
+        : test_mul_mat_id(type, GGML_TYPE_F32, 16, n_used, broadcast, m, rows, k), mask_mode(mask_mode) {}
 
     void reinit_perf_iter(ggml_context *) override {}
 
@@ -5135,7 +5136,9 @@ struct test_mul_mat_id_masked : public test_mul_mat_id {
     ggml_tensor * build_graph(ggml_context * ctx) override {
         ggml_tensor * baseline = test_mul_mat_id::build_graph(ctx);
         ggml_set_name(baseline, "masked_baseline");
-        ggml_build_forward_expand(gf, baseline);
+        if (mode != MODE_PERF) {
+            ggml_build_forward_expand(gf, baseline);
+        }
         ggml_tensor * resident = ggml_new_tensor_2d(ctx, GGML_TYPE_I32, 1, n_mats);
         ggml_set_name(resident, "resident");
         ggml_tensor * out = ggml_mul_mat_id_cpu_masked(ctx, baseline->src[0], baseline->src[1], baseline->src[2], resident);
@@ -10045,6 +10048,14 @@ static std::vector<std::unique_ptr<test_case>> make_test_cases_eval() {
     test_cases.emplace_back(new test_mul_mat(GGML_TYPE_BF16, GGML_TYPE_F32, 16, 16, 256, {2, 3}, {1, 1}, {0, 3, 2, 1}));
 
     for (ggml_type type : {GGML_TYPE_Q4_K, GGML_TYPE_Q5_K, GGML_TYPE_Q5_1, GGML_TYPE_Q8_0}) {
+        const bool k_quant = type == GGML_TYPE_Q4_K || type == GGML_TYPE_Q5_K;
+        for (bool broadcast : {false, true}) {
+            for (int mask_mode : {0, 1, 2}) {
+                test_cases.emplace_back(new test_mul_mat_id_masked(type, 1, broadcast, mask_mode,
+                        10, k_quant ? 640 : 2560, k_quant ? 2560 : 640));
+            }
+            test_cases.emplace_back(new test_mul_mat_id_masked(type, 1, broadcast, 2, 10, 65, 512));
+        }
         for (int rows : {1, 2, 4, 8, 9, 49}) {
             for (int mask_mode : {0, 1, 2}) {
                 for (bool broadcast : {false, true}) {
@@ -11084,6 +11095,16 @@ static std::vector<std::unique_ptr<test_case>> make_test_cases_eval() {
 static std::vector<std::unique_ptr<test_case>> make_test_cases_perf() {
     std::vector<std::unique_ptr<test_case>> test_cases;
 
+    for (ggml_type type : {GGML_TYPE_Q4_K, GGML_TYPE_Q5_K, GGML_TYPE_Q5_1, GGML_TYPE_Q8_0}) {
+        const bool k_quant = type == GGML_TYPE_Q4_K || type == GGML_TYPE_Q5_K;
+        for (bool broadcast : {false, true}) {
+            for (int mask_mode : {0, 2}) {
+                test_cases.emplace_back(new test_mul_mat_id_masked(type, 1, broadcast, mask_mode,
+                        10, k_quant ? 640 : 2560, k_quant ? 2560 : 640));
+            }
+        }
+    }
+
     // SWIGLU at a 27B-class FFN width, fused [gate|up] vs split operands
     // note: same bytes either way, so a backend that indexes them differently shows it here
     for (ggml_type type : {GGML_TYPE_F16, GGML_TYPE_F32}) {
@@ -11685,7 +11706,7 @@ static bool run_fa_vec_slice(ggml_backend_t backend, ggml_backend_t backend_cpu,
 
 // Exercise the actual split FFN, including its registered MMVQ scratch and tiled ID mapping.
 // The reference computes every expert on the CPU from the same authoritative quantized bytes.
-// schedule: 0 = existing serial control, 1 = eligible overlap, 2 = host-read rejection.
+// schedule: 0 = serial control, 1 = overlap, 2 = host-read rejection, 3 = exact staging-copy comparison.
 static bool test_moe_cache_hybrid(ggml_backend_t backend, ggml_backend_dev_t dev, int schedule = 0) {
     auto reg = ggml_backend_dev_backend_reg(dev);
     if (strcmp(ggml_backend_reg_name(reg), "CUDA") != 0) {
@@ -11868,6 +11889,8 @@ static bool test_moe_cache_hybrid(ggml_backend_t backend, ggml_backend_dev_t dev
                 auto * cpu_input = schedule ? ggml_cont(gc, input) : input;
                 auto * cpu_ids = schedule ? ggml_cont(gc, ids_gpu) : ids_gpu;
                 if (schedule) {
+                    ggml_set_name(cpu_input, "fn_cache_prep_input_test");
+                    ggml_set_name(cpu_ids, "fn_cache_prep_ids_test");
                     ggml_backend_sched_set_tensor_backend(sched.get(), cpu_input, cpu.get());
                     ggml_backend_sched_set_tensor_backend(sched.get(), cpu_ids, cpu.get());
                     ggml_build_forward_expand(graph, cpu_input);
@@ -11980,7 +12003,7 @@ static bool test_moe_cache_hybrid(ggml_backend_t backend, ggml_backend_dev_t dev
                     const double run_output_error = nmse(expected.data(), actual.data(), actual.size());
                     const double run_expert_error = nmse(expert_values.data(), merged_values.data(), merged_values.size());
                     bool run_ok = std::isfinite(run_output_error) && std::isfinite(run_expert_error) &&
-                                  run_output_error <= 1e-3 && run_expert_error <= 1e-3;
+                                  (schedule == 3 || (run_output_error <= 1e-3 && run_expert_error <= 1e-3));
                     output_error = std::max(output_error, run_output_error);
                     expert_error = std::max(expert_error, run_expert_error);
                     for (int t = 0; t < rows; ++t) {
@@ -11993,7 +12016,7 @@ static bool test_moe_cache_hybrid(ggml_backend_t backend, ggml_backend_dev_t dev
                         }
                     }
                     std::vector<float> serial;
-                    if (schedule == 1) {
+                    if (schedule == 1 || schedule == 3) {
                         // Keep the exact inputs and graph, but force the ordinary
                         // split barriers through the existing evaluation callback.
                         // This distinguishes overlap corruption from CPU/CUDA
@@ -12059,7 +12082,7 @@ static bool test_moe_cache_hybrid(ggml_backend_t backend, ggml_backend_dev_t dev
         }
     }
     printf("  MOE_CACHE_HYBRID: %d cases, %d evaluations, %d failures\n", cases, cases*4, failures);
-    if (schedule == 1) {
+    if (schedule == 1 || schedule == 3) {
         printf("  MOE_CACHE_HYBRID: %d same-input serial comparisons\n", serial_checks);
     }
     return failures == 0;
@@ -12138,38 +12161,44 @@ static bool test_moe_cache_lifecycle(ggml_backend_t backend, ggml_backend_dev_t 
     ggml_build_forward_expand(graph, post);
     ggml_backend_buffer_ptr graph_buffer(ggml_backend_alloc_ctx_tensors(ctx.get(), backend));
     check(graph_buffer != nullptr, "fence allocation");
+    std::array<uint8_t, 64> actual{};
     for (int cycle = 0; ok && cycle < 3; ++cycle) {
-        for (uint64_t tag = 0; tag < 64; ++tag) {
-            ggml_cuda_moe_cache_copy copy{};
-            copy.tag = tag;
-            for (int f = 0; f < 3; ++f) {
-                copy.host[f] = host[f].data();
-                copy.dst[f] = base + 4096 + tag*256 + f*64;
-                copy.nbytes[f] = 64;
+        // Six queued batches cross the 64 KiB staging-ring boundary. Distinct
+        // source bytes expose premature staging reuse while DMA is in flight.
+        for (int batch = 0; ok && batch < 6; ++batch) {
+            std::array<std::array<std::array<uint8_t, 64>, 3>, 64> queued_host{};
+            for (uint64_t tag = 0; tag < 64; ++tag) {
+                ggml_cuda_moe_cache_copy copy{};
+                copy.tag = tag;
+                for (int f = 0; f < 3; ++f) {
+                    queued_host[tag][f].fill(uint8_t(1 + cycle*29 + batch*17 + tag*3 + f));
+                    copy.host[f] = queued_host[tag][f].data();
+                    copy.dst[f] = base + 4096 + tag*256 + f*64;
+                    copy.nbytes[f] = 64;
+                }
+                check(submit(device, params.owner, &copy) == 0, "bounded queued copy");
             }
-            check(submit(device, params.owner, &copy) == 0, "bounded queued copy");
-        }
-        ggml_cuda_moe_cache_copy extra{};
-        extra.tag = 64;
-        extra.dst[0] = base;
-        extra.nbytes[0] = 64;
-        check(submit(device, params.owner, &extra) != 0, "queue capacity enforced");
-        check(drain(device, params.owner) == 0, "drain pending copies");
-        std::array<uint8_t, 64> actual{};
-        for (uint64_t tag = 0; tag < 64; ++tag) {
-            check(query(device, params.owner, tag, 1) == 1, "completed tag");
-            check(query(device, params.owner, tag, 0) == -1, "tag consumed once");
-            for (int f = 0; f < 3; ++f) {
-                ggml_backend_tensor_get(tensor, actual.data(), 4096 + tag*256 + f*64, actual.size());
-                check(actual == host[f], "all copied bytes match");
+            ggml_cuda_moe_cache_copy extra{};
+            extra.tag = 64;
+            extra.dst[0] = base;
+            extra.nbytes[0] = 64;
+            check(submit(device, params.owner, &extra) != 0, "queue capacity enforced");
+            check(drain(device, params.owner) == 0, "drain pending copies");
+            for (uint64_t tag = 0; tag < 64; ++tag) {
+                check(query(device, params.owner, tag, 1) == 1, "completed tag");
+                check(query(device, params.owner, tag, 0) == -1, "tag consumed once");
+                for (int f = 0; f < 3; ++f) {
+                    ggml_backend_tensor_get(tensor, actual.data(), 4096 + tag*256 + f*64, actual.size());
+                    check(actual == queued_host[tag][f], "all copied bytes match");
+                }
             }
+            extra.dst[0] = base + capacity - 16;
+            check(submit(device, params.owner, &extra) != 0, "out of extent rejected");
+            extra.dst[0] = base;
+            extra.nbytes[0] = 1024;
+            check(submit(device, params.owner, &extra) == 0, "zero old prefill image");
+            check(query(device, params.owner, extra.tag, 1) == 1, "zero complete");
         }
-        extra.dst[0] = base + capacity - 16;
-        check(submit(device, params.owner, &extra) != 0, "out of extent rejected");
-        extra.dst[0] = base;
-        extra.nbytes[0] = 1024;
-        check(submit(device, params.owner, &extra) == 0, "zero old prefill image");
-        check(query(device, params.owner, extra.tag, 1) == 1, "zero complete");
         check(phase(device, params.owner, 0) == 0, "resume prefill");
         const int32_t zero = 0;
         begin(device, &zero, &zero, 1);
@@ -12209,6 +12238,9 @@ static bool test_backend(ggml_backend_t backend, ggml_backend_dev_t dev, test_mo
     }
     if (mode == MODE_TEST && op_names_filter && strcmp(op_names_filter, "MOE_CACHE_OVERLAP") == 0) {
         return test_moe_cache_hybrid(backend, dev, 1);
+    }
+    if (mode == MODE_TEST && op_names_filter && strcmp(op_names_filter, "MOE_CACHE_PREP_COPY") == 0) {
+        return test_moe_cache_hybrid(backend, dev, 3);
     }
     if (mode == MODE_TEST && op_names_filter && strcmp(op_names_filter, "MOE_CACHE_OVERLAP_HOST_REJECT") == 0) {
         return test_moe_cache_hybrid(backend, dev, 2);

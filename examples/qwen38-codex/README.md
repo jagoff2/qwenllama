@@ -1,17 +1,25 @@
-# Qwen3.8 Flash-Next Codex launch snapshot
+# Qwen Flash-Next launch configuration
 
-These files preserve the active local launch configuration identified on 2026-11-08:
+`launch-local.ps1` is the active fast-prefill/GPU-local-decode configuration, copied byte for byte from:
 
-- `launch-local.ps1` is a byte-for-byte copy of `G:\qwenllamaMTP\perf-20260911\bench\flashnext-stream-prefill\launch-best-decode-no-draft-think-guard.ps1`.
-- `qwen38-codex-system-role-demoted.jinja` is a byte-for-byte copy of the template at `G:\qwenllamaMTP\qwen38-codex-system-role-demoted.jinja` referenced by that script, including its local host instructions.
-- `qwen38-codex.jinja` retains the earlier 2026-09-19 template for reference.
+```text
+G:\qwenllamaMTP\perf-20260911\bench\flashnext-stream-prefill\launch-best-decode-no-draft-think-guard.ps1
+```
 
-The launch script retains the original absolute paths. To use another checkout or machine, update the executable, model shards, projector, and chat-template paths. The model and projector weights are external assets.
+Run the installed configuration with:
 
-The launched executable is `G:\qwenllamaMTP\perf-20260911\dist\fn-decode-cache-think-guard-20261006\bin\llama-server.exe`. SHA-256 comparison confirmed that both executables and all eight DLLs in that directory match `G:\qwenllamaMTP\perf-20260911\llama.cpp\build\bin`. The build's CMake cache points to this checkout. The 29 source files in the saved decode-cache implementation manifest match the current files; its documentation file was updated later. All five source and test postimages in the saved reasoning-guard patch also match the current files.
+```powershell
+& 'G:\qwenllamaMTP\perf-20260911\bench\flashnext-stream-prefill\launch-best-decode-no-draft-think-guard.ps1'
+```
 
-This snapshot includes the shared expert decode cache, Qwen FIM-token end-of-generation correction, and reasoning guard that suppresses end-of-generation until visible answer or tool content follows reasoning. The launcher enables `--fn-decode-expert-cache`, disables speculative decoding, uses `--reasoning-format none`, and retains the 261888-token context, F16 KV cache, 4096-token batch and microbatch, and 4096 MiB streamed-expert budget.
+The executable is `G:\qwenllamaMTP\perf-20260911\dist\fn-fast-prefill-local-decode-20261108\bin\llama-server.exe`. The script enables the N=1 masked MMID path and phase-specific expert pools, with eight decode threads and 24 batch threads. It preserves the original 261888-token context capacity, F16 KV, 4096 batch/microbatch, primary-GPU arena prefill, thinking guard, and no-draft configuration.
 
-Build settings recorded in the local CMake cache: Release, MSVC 19.37.32822.0, CUDA 13.2, architecture `120a`, shared libraries, CUDA and Flash Attention enabled, Flash Attention quantizations `q4_0-q4_0;q8_0-q8_0;f16-f16;bf16-bf16`, NCCL disabled, and OpenSSL disabled.
+`launch-pre-phase.ps1` preserves the previous launcher and selects `dist/fn-decode-cache-think-guard-20261006/bin`. It is also available locally as `launch-best-decode-no-draft-think-guard.pre-phase-20261108.ps1`. Stop an existing server before starting either configuration on the same port. The rollback launcher restores the complete previous settings, including its earlier thread defaults; it is not the matched eight-thread benchmark control.
 
-Validation on 2026-11-08 used the existing local test binaries: `test-moe-stream-plan.exe` passed 9568 checks, `test-moe-stream-sim.exe` passed 1108 checks, and `test-reasoning-budget.exe` passed its 12 sampler tests, UTF-8 checks, and output-before-EOG guard checks with `models/ggml-vocab-qwen35.gguf`. The launcher passed PowerShell syntax parsing. This publication did not rebuild the server or rerun the full Qwen model workload; the numerical-parity limitations recorded in [the decode-cache notes](../../docs/shared-expert-decode-cache.md) remain applicable.
+These are machine-specific snapshots, not portable installers. To use another checkout or machine, edit the executable, model shards, projector, and chat-template paths. The scripts clear process environment variables beginning with `LLAMA_`, `GGML_`, `QWEN4EXP_`, `OMP_`, and `DECODE_` before setting explicit controls. The active launcher binds to localhost.
+
+`qwen38-codex-system-role-demoted.jinja` retains the template referenced by the launcher, including its local host instructions. `qwen38-codex.jinja` retains the earlier template for reference. Model and projector weights are not included.
+
+The selected build reached 27.43 t/s in controlled steady replay, with the original fast prefill, but adds about 1.98 seconds at the generation transition. Short requests may not improve. [Results, provenance, and validation](../../docs/performance/2026-11-08/README.md).
+
+Stock upstream b10870 remains installed separately at `C:\Users\user\qwenllama`. The [brief stock comparison](../../docs/performance/2026-11-08/stock-vs-fast/RESULT.md) launched its executable directly; neither launch script here is a stock upstream configuration.

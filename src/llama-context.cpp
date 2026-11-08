@@ -17,6 +17,7 @@
 
 #include <cinttypes>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <limits>
 #include <stdexcept>
@@ -1382,6 +1383,13 @@ const llama_moe_stream * llama_context::moe_stream_update(const int64_t n_tokens
         sp.place_mode   = cparams.moe_stream_gpu_mode;
         sp.place_device = cparams.moe_stream_arena_device;
         sp.place_w      = cparams.moe_stream_split;
+        if (moe_decode_layout) {
+            sp.n_slots = 2;
+            sp.set_budget_mib(4096);
+            sp.place_mode = 0;
+            sp.place_device = -1;
+            sp.place_w.clear();
+        }
 
         moe_stream = llama_moe_stream_create(model, dev_of_layer, sp);
         if (moe_stream == nullptr) {
@@ -1394,6 +1402,28 @@ const llama_moe_stream * llama_context::moe_stream_update(const int64_t n_tokens
     if (moe_stream && cparams.moe_decode_cache && !moe_cache && !moe_cache_failed) {
         llama_moe_cache_params params;
         params.enable = true;
+        if (const char * value = getenv("LLAMA_MOE_CACHE_SLOTS")) {
+            char * end = nullptr;
+            const long slots = strtol(value, &end, 10);
+            if (end != value && *end == '\0' && slots >= 1 && slots <= 511) {
+                params.slots_per_layer = (int) slots;
+            } else {
+                throw std::runtime_error("LLAMA_MOE_CACHE_SLOTS must be between 1 and 511");
+            }
+        }
+        if (const char * value = getenv("LLAMA_MOE_CACHE_ADMISSION_MIB")) {
+            char * end = nullptr;
+            const long mib = strtol(value, &end, 10);
+            if (end != value && *end == '\0' && mib >= 0 && mib <= 1024) {
+                params.admission_bytes = uint64_t(mib) << 20;
+            } else {
+                throw std::runtime_error("LLAMA_MOE_CACHE_ADMISSION_MIB must be between 0 and 1024");
+            }
+        }
+        if (moe_decode_layout) {
+            params.slots_per_layer = 44;
+            params.multi_device = true;
+        }
         moe_cache = llama_moe_cache_create(model, moe_stream, params);
         if (!moe_cache) {
             moe_cache_failed = true;
@@ -1416,8 +1446,56 @@ llm_graph_result * llama_context::process_ubatch(const llama_ubatch & ubatch, ll
         ggml_backend_sched_synchronize(sched.get());
     }
 
+    // Only switch pools at an explicit purpose boundary. Prefill retains the
+    // caller's original arena placement and batch size. KV/model buffers survive.
+    const char * phase_env = std::getenv("LLAMA_MOE_CACHE_PHASE_LAYOUT");
+    const bool phase_layout = phase_env && std::strcmp(phase_env, "1") == 0 && !moe_phase_failed &&
+            cparams.moe_stream_enable && cparams.moe_decode_cache &&
+            model.arch == LLM_ARCH_QWEN4EXP && loras->empty() && decode_purpose != LLAMA_DECODE_AUTO;
+    const bool want_decode = decode_purpose == LLAMA_DECODE_GENERATION;
+    llama_moe_cache_prompt_state saved_routes;
+    bool switched_layout = false;
+    auto reset_layout = [&](bool decode) {
+        ggml_backend_sched_synchronize(sched.get());
+        gf_res_prev->reset();
+        gf_res_reserve->reset();
+        ggml_backend_sched_release_buffers(sched.get());
+        llama_moe_cache_destroy(moe_cache);
+        moe_cache = nullptr;
+        llama_moe_stream_destroy(moe_stream);
+        moe_stream = nullptr;
+        moe_stream_cur = nullptr;
+        moe_cache_cur = nullptr;
+        moe_decode_layout = decode;
+        moe_stream_failed = false;
+        moe_cache_failed = false;
+        moe_stream_need_reserve = true;
+        moe_cache_need_reserve = true;
+    };
+    // <=49-row prompt replay fits the reserved decode graph and keeps its hot
+    // experts. Larger prompt batches restore the original prefill allocation.
+    if (phase_layout && moe_stream && moe_cache && !moe_stream_failed && !moe_cache_failed &&
+            want_decode != moe_decode_layout && (want_decode || ubatch.n_tokens > 49)) {
+        const int64_t started = ggml_time_us();
+        if (want_decode) saved_routes = llama_moe_cache_save_prompt(moe_cache);
+        reset_layout(want_decode);
+        switched_layout = true;
+        LLAMA_LOG_INFO("moe_phase: released %s compute and expert pools in %.2f ms; model/KV retained\n",
+                       want_decode ? "prefill" : "decode", (ggml_time_us() - started) / 1000.0);
+    }
+
     // Select before graph construction. Reserve graphs may contain fences but never execute them.
     moe_stream_cur = moe_stream_update(ubatch.n_tokens);
+    if (switched_layout && want_decode &&
+            !llama_moe_cache_restore_prompt(moe_cache, saved_routes)) {
+        LLAMA_LOG_WARN("moe_phase: decode pool unavailable; restoring original arena layout\n");
+        reset_layout(false);
+        moe_phase_failed = true;
+        moe_stream_cur = moe_stream_update(ubatch.n_tokens);
+        if (!llama_moe_cache_restore_prompt(moe_cache, saved_routes)) {
+            throw std::runtime_error("cannot restore original expert pool after decode transition failure");
+        }
+    }
     moe_cache_cur = nullptr;
     const bool cache_eligible = loras->empty();
     moe_cache_observe = moe_cache && !moe_cache_failed && cache_eligible && decode_purpose != LLAMA_DECODE_AUTO;
@@ -1425,21 +1503,36 @@ llm_graph_result * llama_context::process_ubatch(const llama_ubatch & ubatch, ll
 
     if (moe_cache && !moe_cache_failed) {
         if (moe_cache_need_reserve && cache_eligible) {
-            ggml_backend_sched_synchronize(sched.get());
-            auto mctx_full = memory ? memory->init_full() : nullptr;
-            const auto * saved_stream = moe_stream_cur;
-            moe_stream_cur = nullptr;
-            moe_cache_cur = moe_cache;
-            bool reserved = false;
-            try {
-                const uint32_t rows = std::min<uint32_t>(49, cparams.n_ubatch);
-                reserved = (!memory || mctx_full) && graph_reserve(rows, 1,
-                        std::min(rows, cparams.n_outputs_max), mctx_full.get());
-            } catch (const std::exception & error) {
-                LLAMA_LOG_WARN("moe_cache: full-memory reservation failed: %s\n", error.what());
+            auto reserve_cache = [&]() {
+                ggml_backend_sched_synchronize(sched.get());
+                auto mctx_full = memory ? memory->init_full() : nullptr;
+                const auto * saved_stream = moe_stream_cur;
+                moe_stream_cur = nullptr;
+                moe_cache_cur = moe_cache;
+                bool reserved = false;
+                try {
+                    const uint32_t rows = std::min<uint32_t>(49, cparams.n_ubatch);
+                    reserved = (!memory || mctx_full) && graph_reserve(rows, 1,
+                            std::min(rows, cparams.n_outputs_max), mctx_full.get());
+                } catch (const std::exception & error) {
+                    LLAMA_LOG_WARN("moe_cache: full-memory reservation failed: %s\n", error.what());
+                }
+                moe_cache_cur = nullptr;
+                moe_stream_cur = saved_stream;
+                return reserved;
+            };
+            bool reserved = reserve_cache();
+            if (!reserved && moe_decode_layout) {
+                LLAMA_LOG_WARN("moe_phase: decode graph does not fit; restoring original arena layout\n");
+                saved_routes = llama_moe_cache_save_prompt(moe_cache);
+                reset_layout(false);
+                moe_phase_failed = true;
+                moe_stream_cur = moe_stream_update(ubatch.n_tokens);
+                if (!llama_moe_cache_restore_prompt(moe_cache, saved_routes)) {
+                    throw std::runtime_error("cannot restore original expert pool after decode reservation failure");
+                }
+                reserved = reserve_cache();
             }
-            moe_cache_cur = nullptr;
-            moe_stream_cur = saved_stream;
             moe_cache_need_reserve = false;
             if (!reserved) {
                 moe_cache_failed = true;

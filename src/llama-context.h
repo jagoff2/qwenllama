@@ -366,6 +366,8 @@ private:
     llama_moe_cache * moe_cache_cur = nullptr;
     bool moe_cache_failed = false;
     bool moe_cache_need_reserve = true;
+    bool moe_decode_layout = false;
+    bool moe_phase_failed = false;
     bool moe_cache_observe = false;
     llama_decode_purpose decode_purpose = LLAMA_DECODE_AUTO;
 

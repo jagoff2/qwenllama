@@ -4,6 +4,7 @@
 #include "ggml.h"
 #include <cstddef>
 #include <cstdint>
+#include <vector>
 
 struct llama_model;
 struct llama_moe_stream;
@@ -15,6 +16,7 @@ struct llama_moe_cache_params {
     int warm_rows = 256;
     int max_rows = 49;
     uint64_t admission_bytes = uint64_t(64) << 20;
+    bool multi_device = false;
 };
 
 struct llama_moe_cache_layer_bind {
@@ -30,6 +32,11 @@ llama_moe_cache * llama_moe_cache_create(const llama_model & model, llama_moe_st
                                         const llama_moe_cache_params & params);
 void llama_moe_cache_destroy(llama_moe_cache * cache);
 
+// Host-only routing history survives a synchronized arena-layout transition.
+using llama_moe_cache_prompt_state = std::vector<std::vector<std::vector<int32_t>>>;
+llama_moe_cache_prompt_state llama_moe_cache_save_prompt(const llama_moe_cache * cache);
+bool llama_moe_cache_restore_prompt(llama_moe_cache * cache, const llama_moe_cache_prompt_state & state);
+
 // Caller drains scheduler work before prepare, observe, finish, or destruction.
 bool llama_moe_cache_prepare(llama_moe_cache * cache, int64_t n_tokens, bool prefill);
 bool llama_moe_cache_bind(const llama_moe_cache * cache, int il, llama_moe_cache_layer_bind & out);
@@ -41,8 +48,9 @@ bool llama_moe_cache_sync(llama_moe_cache * cache);
 uint64_t llama_moe_cache_generation(const llama_moe_cache * cache);
 bool llama_moe_cache_failed(const llama_moe_cache * cache);
 
-// Offsets are relative to the scratch span, after cache metadata. No device allocation occurs.
-size_t llama_moe_cache_scratch_capacity(const llama_moe_cache * cache, size_t extent);
-bool llama_moe_cache_scratch_bind(llama_moe_cache * cache, ggml_tensor * tensor, size_t extent, size_t offset);
+// Extent is an ordinal among spans on this device. Offsets are after cache
+// metadata; binding never allocates device memory or crosses a device boundary.
+size_t llama_moe_cache_scratch_capacity(const llama_moe_cache * cache, int device, size_t extent);
+bool llama_moe_cache_scratch_bind(llama_moe_cache * cache, ggml_tensor * tensor, int device, size_t extent, size_t offset);
 
 #endif

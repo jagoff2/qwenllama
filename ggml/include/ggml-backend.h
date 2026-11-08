@@ -350,6 +350,11 @@ extern "C" {
     // The correct way to use this API is to discard the deallocated tensors and create new ones.
     GGML_API void                 ggml_backend_sched_reset(ggml_backend_sched_t sched);
 
+    // Synchronize and release owned compute buffers, preserving the backends.
+    // Discard all graphs using those buffers before reserving a fresh graph.
+    // Model weights and externally allocated state buffers are not released.
+    GGML_API void                 ggml_backend_sched_release_buffers(ggml_backend_sched_t sched);
+
     // Set a callback to be called for each resulting node during graph compute
     GGML_API void                 ggml_backend_sched_set_eval_callback(ggml_backend_sched_t sched, ggml_backend_sched_eval_callback callback, void * user_data);
 

@@ -1,0 +1,2468 @@
+{
+  "control-screen": {
+    "runs": [
+      {
+        "label": "control-screen-0-control-t24",
+        "threads": 24,
+        "variant": "control",
+        "compact": false,
+        "batch_d2h": false,
+        "output": "G:\\qwenllamaMTP\\perf-20260911\\bench\\decode-optimization-20261108\\control-screen\\result-0-control-t24.json",
+        "measured_tokens": 256,
+        "measured_us": 12044016.0,
+        "tps": 21.255368641157567,
+        "max_logit_delta": 3.2545089721679688,
+        "relative_l2": 0.0642921641270214,
+        "different_logits": 79462350,
+        "argmax_different": 12,
+        "nonfinite": 0
+      },
+      {
+        "label": "control-screen-1-compact-t24",
+        "threads": 24,
+        "variant": "compact",
+        "compact": true,
+        "batch_d2h": false,
+        "output": "G:\\qwenllamaMTP\\perf-20260911\\bench\\decode-optimization-20261108\\control-screen\\result-1-compact-t24.json",
+        "measured_tokens": 256,
+        "measured_us": 12291877.0,
+        "tps": 20.826762259335982,
+        "max_logit_delta": 3.1488638520240784,
+        "relative_l2": 0.0664464527169636,
+        "different_logits": 79462355,
+        "argmax_different": 8,
+        "nonfinite": 0
+      },
+      {
+        "label": "control-screen-2-batch-t24",
+        "threads": 24,
+        "variant": "batch",
+        "compact": false,
+        "batch_d2h": true,
+        "output": "G:\\qwenllamaMTP\\perf-20260911\\bench\\decode-optimization-20261108\\control-screen\\result-2-batch-t24.json",
+        "measured_tokens": 256,
+        "measured_us": 12370582.0,
+        "tps": 20.69425674555975,
+        "max_logit_delta": 3.3498802185058594,
+        "relative_l2": 0.0661885774678321,
+        "different_logits": 79462354,
+        "argmax_different": 15,
+        "nonfinite": 0
+      },
+      {
+        "label": "control-screen-3-control-t8",
+        "threads": 8,
+        "variant": "control",
+        "compact": false,
+        "batch_d2h": false,
+        "output": "G:\\qwenllamaMTP\\perf-20260911\\bench\\decode-optimization-20261108\\control-screen\\result-3-control-t8.json",
+        "measured_tokens": 256,
+        "measured_us": 10903883.0,
+        "tps": 23.477874808451265,
+        "max_logit_delta": 6.4968894720077515,
+        "relative_l2": 0.07678512787089536,
+        "different_logits": 79462349,
+        "argmax_different": 16,
+        "nonfinite": 0
+      },
+      {
+        "label": "control-screen-4-compact-t8",
+        "threads": 8,
+        "variant": "compact",
+        "compact": true,
+        "batch_d2h": false,
+        "output": "G:\\qwenllamaMTP\\perf-20260911\\bench\\decode-optimization-20261108\\control-screen\\result-4-compact-t8.json",
+        "measured_tokens": 256,
+        "measured_us": 11410235.0,
+        "tps": 22.435997155185675,
+        "max_logit_delta": 2.9790000915527344,
+        "relative_l2": 0.05961856114878217,
+        "different_logits": 79462348,
+        "argmax_different": 11,
+        "nonfinite": 0
+      },
+      {
+        "label": "control-screen-5-batch-t8",
+        "threads": 8,
+        "variant": "batch",
+        "compact": false,
+        "batch_d2h": true,
+        "output": "G:\\qwenllamaMTP\\perf-20260911\\bench\\decode-optimization-20261108\\control-screen\\result-5-batch-t8.json",
+        "measured_tokens": 256,
+        "measured_us": 11323079.0,
+        "tps": 22.60869150519925,
+        "max_logit_delta": 3.331389307975769,
+        "relative_l2": 0.06656199159909962,
+        "different_logits": 79462363,
+        "argmax_different": 13,
+        "nonfinite": 0
+      }
+    ],
+    "by_threads": {
+      "8": {
+        "count": 3,
+        "mean_tps": 22.840854489612063,
+        "min_tps": 22.435997155185675,
+        "max_tps": 23.477874808451265,
+        "stdev_tps": 0.5583923348257492
+      },
+      "24": {
+        "count": 3,
+        "mean_tps": 20.925462548684433,
+        "min_tps": 20.69425674555975,
+        "max_tps": 21.255368641157567,
+        "stdev_tps": 0.29328816918424294
+      }
+    },
+    "by_case": {
+      "control-t24-0": 21.255368641157567,
+      "compact-t24-1": 20.826762259335982,
+      "batch-t24-2": 20.69425674555975,
+      "control-t8-3": 23.477874808451265,
+      "compact-t8-4": 22.435997155185675,
+      "batch-t8-5": 22.60869150519925
+    },
+    "profile": {
+      "per_token": {
+        "control-screen-0-control-t24/CPU": {
+          "splits": 93.0,
+          "backend_calls": 93.0,
+          "source_wait_us": 17885.54296875,
+          "destination_wait_us": 3.48828125,
+          "copy_us": 1113.18359375,
+          "async_try_us": 3.91015625,
+          "prewait_us": 0.0,
+          "fences_us": 27.1171875,
+          "inputs_total_us": 19054.19921875,
+          "compute_or_submit_us": 16676.9765625,
+          "event_record_us": 6.546875
+        },
+        "control-screen-0-control-t24/CUDA0": {
+          "splits": 93.0,
+          "backend_calls": 93.0,
+          "source_wait_us": 1.6953125,
+          "destination_wait_us": 18.6484375,
+          "copy_us": 1256.6640625,
+          "async_try_us": 2196.05859375,
+          "prewait_us": 0.0,
+          "fences_us": 32.25390625,
+          "inputs_total_us": 3929.6796875,
+          "compute_or_submit_us": 1181.17578125,
+          "event_record_us": 4.9375
+        },
+        "control-screen-0-control-t24/CUDA1": {
+          "splits": 22.0,
+          "backend_calls": 22.0,
+          "source_wait_us": 0.26171875,
+          "destination_wait_us": 2.6953125,
+          "copy_us": 122.4140625,
+          "async_try_us": 834.390625,
+          "prewait_us": 0.0,
+          "fences_us": 6.8125,
+          "inputs_total_us": 1350.578125,
+          "compute_or_submit_us": 401.24609375,
+          "event_record_us": 1.03515625
+        },
+        "control-screen-1-compact-t24/CPU": {
+          "splits": 47.0,
+          "backend_calls": 47.0,
+          "source_wait_us": 11144.99609375,
+          "destination_wait_us": 4.453125,
+          "copy_us": 1176.43359375,
+          "async_try_us": 5.54296875,
+          "prewait_us": 0.0,
+          "fences_us": 16.52734375,
+          "inputs_total_us": 12380.6640625,
+          "compute_or_submit_us": 15825.31640625,
+          "event_record_us": 3.89453125
+        },
+        "control-screen-1-compact-t24/CUDA0": {
+          "splits": 68.0,
+          "backend_calls": 68.0,
+          "source_wait_us": 1.7734375,
+          "destination_wait_us": 17.109375,
+          "copy_us": 1226.37890625,
+          "async_try_us": 2079.26953125,
+          "prewait_us": 0.0,
+          "fences_us": 25.83203125,
+          "inputs_total_us": 12662.875,
+          "compute_or_submit_us": 970.453125,
+          "event_record_us": 3.421875
+        },
+        "control-screen-1-compact-t24/CUDA1": {
+          "splits": 22.0,
+          "backend_calls": 22.0,
+          "source_wait_us": 0.2109375,
+          "destination_wait_us": 2.91015625,
+          "copy_us": 123.23828125,
+          "async_try_us": 838.28125,
+          "prewait_us": 0.0,
+          "fences_us": 6.859375,
+          "inputs_total_us": 1380.921875,
+          "compute_or_submit_us": 409.66796875,
+          "event_record_us": 1.04296875
+        },
+        "control-screen-2-batch-t24/CPU": {
+          "splits": 93.0,
+          "backend_calls": 93.0,
+          "source_wait_us": 19045.14453125,
+          "destination_wait_us": 0.0,
+          "copy_us": 0.0,
+          "async_try_us": 552.1875,
+          "prewait_us": 0.0,
+          "fences_us": 27.4375,
+          "inputs_total_us": 19628.48046875,
+          "compute_or_submit_us": 17131.64453125,
+          "event_record_us": 6.33203125
+        },
+        "control-screen-2-batch-t24/CUDA0": {
+          "splits": 93.0,
+          "backend_calls": 93.0,
+          "source_wait_us": 1.70703125,
+          "destination_wait_us": 19.63671875,
+          "copy_us": 1297.79296875,
+          "async_try_us": 2249.23828125,
+          "prewait_us": 0.0,
+          "fences_us": 33.890625,
+          "inputs_total_us": 4026.72265625,
+          "compute_or_submit_us": 1278.72265625,
+          "event_record_us": 5.0
+        },
+        "control-screen-2-batch-t24/CUDA1": {
+          "splits": 22.0,
+          "backend_calls": 22.0,
+          "source_wait_us": 0.2109375,
+          "destination_wait_us": 3.25,
+          "copy_us": 126.6796875,
+          "async_try_us": 829.59375,
+          "prewait_us": 0.0,
+          "fences_us": 7.19140625,
+          "inputs_total_us": 1370.6640625,
+          "compute_or_submit_us": 420.03125,
+          "event_record_us": 0.98046875
+        },
+        "control-screen-3-control-t8/CPU": {
+          "splits": 93.0,
+          "backend_calls": 93.0,
+          "source_wait_us": 18064.5546875,
+          "destination_wait_us": 1.6484375,
+          "copy_us": 897.7109375,
+          "async_try_us": 1.61328125,
+          "prewait_us": 0.0,
+          "fences_us": 13.3828125,
+          "inputs_total_us": 18994.62109375,
+          "compute_or_submit_us": 14703.26953125,
+          "event_record_us": 2.35546875
+        },
+        "control-screen-3-control-t8/CUDA0": {
+          "splits": 93.0,
+          "backend_calls": 93.0,
+          "source_wait_us": 1.4140625,
+          "destination_wait_us": 9.734375,
+          "copy_us": 950.9453125,
+          "async_try_us": 1169.390625,
+          "prewait_us": 0.0,
+          "fences_us": 17.95703125,
+          "inputs_total_us": 2865.27734375,
+          "compute_or_submit_us": 701.56640625,
+          "event_record_us": 1.8515625
+        },
+        "control-screen-3-control-t8/CUDA1": {
+          "splits": 22.0,
+          "backend_calls": 22.0,
+          "source_wait_us": 0.15234375,
+          "destination_wait_us": 1.48828125,
+          "copy_us": 105.5234375,
+          "async_try_us": 457.58984375,
+          "prewait_us": 0.0,
+          "fences_us": 3.84765625,
+          "inputs_total_us": 1231.875,
+          "compute_or_submit_us": 246.44140625,
+          "event_record_us": 0.43359375
+        },
+        "control-screen-4-compact-t8/CPU": {
+          "splits": 47.0,
+          "backend_calls": 47.0,
+          "source_wait_us": 11106.125,
+          "destination_wait_us": 1.6640625,
+          "copy_us": 1138.07421875,
+          "async_try_us": 1.85546875,
+          "prewait_us": 0.0,
+          "fences_us": 9.78515625,
+          "inputs_total_us": 12278.0234375,
+          "compute_or_submit_us": 14492.76953125,
+          "event_record_us": 1.76953125
+        },
+        "control-screen-4-compact-t8/CUDA0": {
+          "splits": 68.0,
+          "backend_calls": 68.0,
+          "source_wait_us": 1.2265625,
+          "destination_wait_us": 9.46875,
+          "copy_us": 907.359375,
+          "async_try_us": 1267.68359375,
+          "prewait_us": 0.0,
+          "fences_us": 14.48828125,
+          "inputs_total_us": 11759.85546875,
+          "compute_or_submit_us": 646.69921875,
+          "event_record_us": 1.546875
+        },
+        "control-screen-4-compact-t8/CUDA1": {
+          "splits": 22.0,
+          "backend_calls": 22.0,
+          "source_wait_us": 0.16015625,
+          "destination_wait_us": 1.82421875,
+          "copy_us": 107.73828125,
+          "async_try_us": 462.69921875,
+          "prewait_us": 0.0,
+          "fences_us": 4.14453125,
+          "inputs_total_us": 1239.4609375,
+          "compute_or_submit_us": 259.78125,
+          "event_record_us": 0.484375
+        },
+        "control-screen-5-batch-t8/CPU": {
+          "splits": 93.0,
+          "backend_calls": 93.0,
+          "source_wait_us": 19298.00390625,
+          "destination_wait_us": 0.0,
+          "copy_us": 0.0,
+          "async_try_us": 305.5859375,
+          "prewait_us": 0.0,
+          "fences_us": 14.25390625,
+          "inputs_total_us": 19628.234375,
+          "compute_or_submit_us": 15281.40625,
+          "event_record_us": 2.66015625
+        },
+        "control-screen-5-batch-t8/CUDA0": {
+          "splits": 93.0,
+          "backend_calls": 93.0,
+          "source_wait_us": 1.09765625,
+          "destination_wait_us": 9.91796875,
+          "copy_us": 1020.39453125,
+          "async_try_us": 1238.69921875,
+          "prewait_us": 0.0,
+          "fences_us": 18.9609375,
+          "inputs_total_us": 3011.23828125,
+          "compute_or_submit_us": 740.0546875,
+          "event_record_us": 1.9765625
+        },
+        "control-screen-5-batch-t8/CUDA1": {
+          "splits": 22.0,
+          "backend_calls": 22.0,
+          "source_wait_us": 0.2734375,
+          "destination_wait_us": 1.6484375,
+          "copy_us": 112.63671875,
+          "async_try_us": 462.1640625,
+          "prewait_us": 0.0,
+          "fences_us": 4.31640625,
+          "inputs_total_us": 1254.734375,
+          "compute_or_submit_us": 263.921875,
+          "event_record_us": 0.44921875
+        }
+      },
+      "outside_splits_us_per_token": {
+        "control-screen-0-control-t24": 4374.37890625,
+        "control-screen-1-compact-t24": 4327.66796875,
+        "control-screen-2-batch-t24": 4385.48828125,
+        "control-screen-3-control-t8": 3810.4140625,
+        "control-screen-4-compact-t8": 3862.421875,
+        "control-screen-5-batch-t8": 4008.5703125
+      }
+    }
+  },
+  "control-staging": {
+    "runs": [
+      {
+        "label": "control-staging-0-control-t24",
+        "threads": 24,
+        "variant": "control",
+        "compact": false,
+        "batch_d2h": false,
+        "serial": false,
+        "output": "G:\\qwenllamaMTP\\perf-20260911\\bench\\decode-optimization-20261108\\control-staging\\result-0-control-t24.json",
+        "measured_tokens": 256,
+        "measured_us": 11972637.0,
+        "tps": 21.38208984369943,
+        "max_logit_delta": 3.183230400085449,
+        "relative_l2": 0.06479367694606482,
+        "different_logits": 79462363,
+        "argmax_different": 9,
+        "nonfinite": 0
+      },
+      {
+        "label": "control-staging-1-serial-t24",
+        "threads": 24,
+        "variant": "serial",
+        "compact": false,
+        "batch_d2h": false,
+        "serial": true,
+        "output": "G:\\qwenllamaMTP\\perf-20260911\\bench\\decode-optimization-20261108\\control-staging\\result-1-serial-t24.json",
+        "measured_tokens": 256,
+        "measured_us": 11807736.0,
+        "tps": 21.680701533299864,
+        "max_logit_delta": 3.986290991306305,
+        "relative_l2": 0.0673735036513008,
+        "different_logits": 79462347,
+        "argmax_different": 10,
+        "nonfinite": 0
+      },
+      {
+        "label": "control-staging-2-control-t8",
+        "threads": 8,
+        "variant": "control",
+        "compact": false,
+        "batch_d2h": false,
+        "serial": false,
+        "output": "G:\\qwenllamaMTP\\perf-20260911\\bench\\decode-optimization-20261108\\control-staging\\result-2-control-t8.json",
+        "measured_tokens": 256,
+        "measured_us": 10904571.0,
+        "tps": 23.476393523413254,
+        "max_logit_delta": 3.773529291152954,
+        "relative_l2": 0.06980538868316262,
+        "different_logits": 79462340,
+        "argmax_different": 17,
+        "nonfinite": 0
+      },
+      {
+        "label": "control-staging-3-serial-t8",
+        "threads": 8,
+        "variant": "serial",
+        "compact": false,
+        "batch_d2h": false,
+        "serial": true,
+        "output": "G:\\qwenllamaMTP\\perf-20260911\\bench\\decode-optimization-20261108\\control-staging\\result-3-serial-t8.json",
+        "measured_tokens": 256,
+        "measured_us": 10947012.0,
+        "tps": 23.385376758516387,
+        "max_logit_delta": 5.531507134437561,
+        "relative_l2": 0.0719285806940108,
+        "different_logits": 79462352,
+        "argmax_different": 17,
+        "nonfinite": 0
+      }
+    ],
+    "by_threads": {
+      "8": {
+        "count": 2,
+        "mean_tps": 23.43088514096482,
+        "min_tps": 23.385376758516387,
+        "max_tps": 23.476393523413254,
+        "stdev_tps": 0.06435857166023665
+      },
+      "24": {
+        "count": 2,
+        "mean_tps": 21.531395688499646,
+        "min_tps": 21.38208984369943,
+        "max_tps": 21.680701533299864,
+        "stdev_tps": 0.21115035065803983
+      }
+    },
+    "by_case": {
+      "control-t24-0": 21.38208984369943,
+      "serial-t24-1": 21.680701533299864,
+      "control-t8-2": 23.476393523413254,
+      "serial-t8-3": 23.385376758516387
+    },
+    "profile": {
+      "per_token": {
+        "control-staging-0-control-t24/CPU": {
+          "splits": 93.0,
+          "backend_calls": 93.0,
+          "source_wait_us": 17777.52734375,
+          "destination_wait_us": 2.66015625,
+          "copy_us": 1087.37109375,
+          "async_try_us": 3.91796875,
+          "prewait_us": 3.04296875,
+          "fences_us": 27.671875,
+          "inputs_total_us": 18922.83984375,
+          "compute_or_submit_us": 16702.44140625,
+          "event_record_us": 5.98046875
+        },
+        "control-staging-0-control-t24/CUDA0": {
+          "splits": 93.0,
+          "backend_calls": 93.0,
+          "source_wait_us": 1.60546875,
+          "destination_wait_us": 23.984375,
+          "copy_us": 1347.95703125,
+          "async_try_us": 2135.6015625,
+          "prewait_us": 267.34375,
+          "fences_us": 29.40234375,
+          "inputs_total_us": 3829.92578125,
+          "compute_or_submit_us": 1162.9296875,
+          "event_record_us": 4.55078125
+        },
+        "control-staging-0-control-t24/CUDA1": {
+          "splits": 22.0,
+          "backend_calls": 22.0,
+          "source_wait_us": 0.1875,
+          "destination_wait_us": 27.04296875,
+          "copy_us": 252.16015625,
+          "async_try_us": 812.86328125,
+          "prewait_us": 228.00390625,
+          "fences_us": 6.7421875,
+          "inputs_total_us": 1337.0859375,
+          "compute_or_submit_us": 398.1484375,
+          "event_record_us": 1.11328125
+        },
+        "control-staging-1-serial-t24/CPU": {
+          "splits": 93.0,
+          "backend_calls": 47.0,
+          "source_wait_us": 17710.39453125,
+          "destination_wait_us": 3.47265625,
+          "copy_us": 1138.703125,
+          "async_try_us": 6.875,
+          "prewait_us": 3.88671875,
+          "fences_us": 29.828125,
+          "inputs_total_us": 18922.5859375,
+          "compute_or_submit_us": 15835.12890625,
+          "event_record_us": 6.90625
+        },
+        "control-staging-1-serial-t24/CUDA0": {
+          "splits": 93.0,
+          "backend_calls": 93.0,
+          "source_wait_us": 1.60546875,
+          "destination_wait_us": 26.0703125,
+          "copy_us": 1314.66015625,
+          "async_try_us": 2360.53125,
+          "prewait_us": 246.10546875,
+          "fences_us": 41.44921875,
+          "inputs_total_us": 4009.49609375,
+          "compute_or_submit_us": 1228.89453125,
+          "event_record_us": 4.65625
+        },
+        "control-staging-1-serial-t24/CUDA1": {
+          "splits": 22.0,
+          "backend_calls": 22.0,
+          "source_wait_us": 0.19921875,
+          "destination_wait_us": 27.40625,
+          "copy_us": 259.1171875,
+          "async_try_us": 830.32421875,
+          "prewait_us": 238.6484375,
+          "fences_us": 7.234375,
+          "inputs_total_us": 1372.25390625,
+          "compute_or_submit_us": 397.3046875,
+          "event_record_us": 0.99609375
+        },
+        "control-staging-2-control-t8/CPU": {
+          "splits": 93.0,
+          "backend_calls": 93.0,
+          "source_wait_us": 18055.1484375,
+          "destination_wait_us": 1.703125,
+          "copy_us": 922.80859375,
+          "async_try_us": 1.64453125,
+          "prewait_us": 1.59375,
+          "fences_us": 14.53125,
+          "inputs_total_us": 19012.90234375,
+          "compute_or_submit_us": 14598.27734375,
+          "event_record_us": 2.87109375
+        },
+        "control-staging-2-control-t8/CUDA0": {
+          "splits": 93.0,
+          "backend_calls": 93.0,
+          "source_wait_us": 1.0859375,
+          "destination_wait_us": 10.07421875,
+          "copy_us": 1017.1640625,
+          "async_try_us": 1189.9453125,
+          "prewait_us": 615.37109375,
+          "fences_us": 17.46484375,
+          "inputs_total_us": 2875.03515625,
+          "compute_or_submit_us": 730.25,
+          "event_record_us": 2.41796875
+        },
+        "control-staging-2-control-t8/CUDA1": {
+          "splits": 22.0,
+          "backend_calls": 22.0,
+          "source_wait_us": 0.1953125,
+          "destination_wait_us": 39.65625,
+          "copy_us": 225.17578125,
+          "async_try_us": 450.3828125,
+          "prewait_us": 501.2734375,
+          "fences_us": 3.51171875,
+          "inputs_total_us": 1229.234375,
+          "compute_or_submit_us": 257.01953125,
+          "event_record_us": 0.50390625
+        },
+        "control-staging-3-serial-t8/CPU": {
+          "splits": 93.0,
+          "backend_calls": 47.0,
+          "source_wait_us": 18046.06640625,
+          "destination_wait_us": 1.9765625,
+          "copy_us": 884.2890625,
+          "async_try_us": 1.67578125,
+          "prewait_us": 1.8359375,
+          "fences_us": 15.484375,
+          "inputs_total_us": 18967.015625,
+          "compute_or_submit_us": 14866.05078125,
+          "event_record_us": 4.171875
+        },
+        "control-staging-3-serial-t8/CUDA0": {
+          "splits": 93.0,
+          "backend_calls": 93.0,
+          "source_wait_us": 1.17578125,
+          "destination_wait_us": 11.23046875,
+          "copy_us": 1027.01953125,
+          "async_try_us": 1530.81640625,
+          "prewait_us": 220.30859375,
+          "fences_us": 31.73828125,
+          "inputs_total_us": 2833.78515625,
+          "compute_or_submit_us": 690.328125,
+          "event_record_us": 2.3515625
+        },
+        "control-staging-3-serial-t8/CUDA1": {
+          "splits": 22.0,
+          "backend_calls": 22.0,
+          "source_wait_us": 0.13671875,
+          "destination_wait_us": 38.484375,
+          "copy_us": 213.75,
+          "async_try_us": 475.84765625,
+          "prewait_us": 499.06640625,
+          "fences_us": 4.21484375,
+          "inputs_total_us": 1239.4453125,
+          "compute_or_submit_us": 256.609375,
+          "event_record_us": 0.484375
+        }
+      },
+      "outside_splits_us_per_token": {
+        "control-staging-0-control-t24": 4339.28125,
+        "control-staging-1-serial-t24": 4267.234375,
+        "control-staging-2-control-t8": 3851.9609375,
+        "control-staging-3-serial-t8": 3850.0859375
+      },
+      "cpu_per_token": {
+        "control-staging-0-control-t24": {
+          "all_ops_us": 15009.00390625,
+          "moe_us": 14710.2890625,
+          "moe_ops": 138.0,
+          "logical_bytes": 816318400.0,
+          "routes": 1380.0,
+          "misses": 785.3203125
+        },
+        "control-staging-1-serial-t24": {
+          "all_ops_us": 14905.296875,
+          "moe_us": 14772.796875,
+          "moe_ops": 138.0,
+          "logical_bytes": 815650000.0,
+          "routes": 1380.0,
+          "misses": 784.69921875
+        },
+        "control-staging-2-control-t8": {
+          "all_ops_us": 13711.6875,
+          "moe_us": 13575.25390625,
+          "moe_ops": 138.0,
+          "logical_bytes": 819816400.0,
+          "routes": 1380.0,
+          "misses": 788.77734375
+        },
+        "control-staging-3-serial-t8": {
+          "all_ops_us": 14222.33984375,
+          "moe_us": 14154.74609375,
+          "moe_ops": 138.0,
+          "logical_bytes": 818355200.0,
+          "routes": 1380.0,
+          "misses": 787.32421875
+        }
+      }
+    }
+  },
+  "local-cache-44-balanced": {
+    "runs": [
+      {
+        "label": "local-cache-44-balanced-0-n1-t8",
+        "threads": 8,
+        "variant": "n1",
+        "compact": false,
+        "batch_d2h": false,
+        "serial": false,
+        "output": "G:\\qwenllamaMTP\\perf-20260911\\bench\\decode-optimization-20261108\\local-cache-44-balanced\\result-0-n1-t8.json",
+        "measured_tokens": 256,
+        "measured_us": 9513305.0,
+        "tps": 26.90968070507568,
+        "max_logit_delta": 6.577792644500732,
+        "relative_l2": 0.07839004619044557,
+        "different_logits": 79462355,
+        "argmax_different": 15,
+        "nonfinite": 0
+      }
+    ],
+    "by_threads": {
+      "8": {
+        "count": 1,
+        "mean_tps": 26.90968070507568,
+        "min_tps": 26.90968070507568,
+        "max_tps": 26.90968070507568,
+        "stdev_tps": null
+      }
+    },
+    "profile": {
+      "per_token": {
+        "local-cache-44-balanced-0-n1-t8/CPU": {
+          "splits": 93.0,
+          "backend_calls": 93.0,
+          "source_wait_us": 17224.171875,
+          "destination_wait_us": 1.67578125,
+          "copy_us": 836.859375,
+          "async_try_us": 1.765625,
+          "prewait_us": 1.68359375,
+          "fences_us": 13.40625,
+          "inputs_total_us": 18097.16015625,
+          "compute_or_submit_us": 12371.359375,
+          "event_record_us": 3.0625
+        },
+        "local-cache-44-balanced-0-n1-t8/CUDA0": {
+          "splits": 53.0,
+          "backend_calls": 53.0,
+          "source_wait_us": 0.66015625,
+          "destination_wait_us": 7.703125,
+          "copy_us": 723.90625,
+          "async_try_us": 2.9453125,
+          "prewait_us": 95.73046875,
+          "fences_us": 11.140625,
+          "inputs_total_us": 847.7265625,
+          "compute_or_submit_us": 464.2734375,
+          "event_record_us": 1.15234375
+        },
+        "local-cache-44-balanced-0-n1-t8/CUDA1": {
+          "splits": 41.0,
+          "backend_calls": 41.0,
+          "source_wait_us": 0.57421875,
+          "destination_wait_us": 6.3828125,
+          "copy_us": 863.83984375,
+          "async_try_us": 62.1484375,
+          "prewait_us": 227.03515625,
+          "fences_us": 7.48828125,
+          "inputs_total_us": 1174.171875,
+          "compute_or_submit_us": 330.59765625,
+          "event_record_us": 0.94921875
+        }
+      },
+      "outside_splits_us_per_token": {
+        "local-cache-44-balanced-0-n1-t8": 3838.859375
+      },
+      "cpu_per_token": {
+        "local-cache-44-balanced-0-n1-t8": {
+          "all_ops_us": 11702.859375,
+          "moe_us": 11531.5546875,
+          "moe_ops": 138.0,
+          "logical_bytes": 643315200.0,
+          "routes": 1380.0,
+          "misses": 618.50390625
+        }
+      }
+    }
+  },
+  "local-cache-abba": {
+    "runs": [
+      {
+        "label": "local-cache-abba-0-primary27",
+        "threads": 8,
+        "variant": "n1",
+        "compact": false,
+        "batch_d2h": false,
+        "serial": false,
+        "output": "G:\\qwenllamaMTP\\perf-20260911\\bench\\decode-optimization-20261108\\local-cache-abba\\result-0-primary27.json",
+        "stream_mode": "primary",
+        "cache_slots": 27,
+        "measured_tokens": 256,
+        "measured_us": 11001456.0,
+        "tps": 23.269647217604653,
+        "max_logit_delta": 3.7329139709472656,
+        "relative_l2": 0.07357309943510747,
+        "different_logits": 79462346,
+        "argmax_different": 17,
+        "nonfinite": 0
+      },
+      {
+        "label": "local-cache-abba-1-layer44",
+        "threads": 8,
+        "variant": "n1",
+        "compact": false,
+        "batch_d2h": false,
+        "serial": false,
+        "output": "G:\\qwenllamaMTP\\perf-20260911\\bench\\decode-optimization-20261108\\local-cache-abba\\result-1-layer44.json",
+        "stream_mode": "layer",
+        "cache_slots": 44,
+        "measured_tokens": 256,
+        "measured_us": 9592158.0,
+        "tps": 26.688467808807985,
+        "max_logit_delta": 3.839226007461548,
+        "relative_l2": 0.07086923476121006,
+        "different_logits": 79462348,
+        "argmax_different": 17,
+        "nonfinite": 0
+      },
+      {
+        "label": "local-cache-abba-2-layer44",
+        "threads": 8,
+        "variant": "n1",
+        "compact": false,
+        "batch_d2h": false,
+        "serial": false,
+        "output": "G:\\qwenllamaMTP\\perf-20260911\\bench\\decode-optimization-20261108\\local-cache-abba\\result-2-layer44.json",
+        "stream_mode": "layer",
+        "cache_slots": 44,
+        "measured_tokens": 256,
+        "measured_us": 9607246.0,
+        "tps": 26.646554069709467,
+        "max_logit_delta": 6.7038270235061646,
+        "relative_l2": 0.07841669301958344,
+        "different_logits": 79462361,
+        "argmax_different": 13,
+        "nonfinite": 0
+      },
+      {
+        "label": "local-cache-abba-3-primary27",
+        "threads": 8,
+        "variant": "n1",
+        "compact": false,
+        "batch_d2h": false,
+        "serial": false,
+        "output": "G:\\qwenllamaMTP\\perf-20260911\\bench\\decode-optimization-20261108\\local-cache-abba\\result-3-primary27.json",
+        "stream_mode": "primary",
+        "cache_slots": 27,
+        "measured_tokens": 256,
+        "measured_us": 10696037.0,
+        "tps": 23.934098208523398,
+        "max_logit_delta": 4.310769319534302,
+        "relative_l2": 0.07199024914854765,
+        "different_logits": 79462359,
+        "argmax_different": 16,
+        "nonfinite": 0
+      }
+    ],
+    "by_threads": {
+      "8": {
+        "count": 4,
+        "mean_tps": 25.134691826161376,
+        "min_tps": 23.269647217604653,
+        "max_tps": 26.688467808807985,
+        "stdev_tps": 1.7906948068962176
+      }
+    },
+    "by_case": {
+      "n1-t8-0": 23.269647217604653,
+      "n1-t8-1": 26.688467808807985,
+      "n1-t8-2": 26.646554069709467,
+      "n1-t8-3": 23.934098208523398
+    },
+    "profile": {
+      "per_token": {
+        "local-cache-abba-0-primary27/CPU": {
+          "splits": 93.0,
+          "backend_calls": 93.0,
+          "source_wait_us": 17977.890625,
+          "destination_wait_us": 1.8203125,
+          "copy_us": 892.75390625,
+          "async_try_us": 1.91796875,
+          "prewait_us": 1.96484375,
+          "fences_us": 14.58984375,
+          "inputs_total_us": 18906.33203125,
+          "compute_or_submit_us": 15112.1640625,
+          "event_record_us": 2.96484375
+        },
+        "local-cache-abba-0-primary27/CUDA0": {
+          "splits": 93.0,
+          "backend_calls": 93.0,
+          "source_wait_us": 1.0859375,
+          "destination_wait_us": 12.02734375,
+          "copy_us": 1051.484375,
+          "async_try_us": 1230.5703125,
+          "prewait_us": 517.69921875,
+          "fences_us": 19.6015625,
+          "inputs_total_us": 2854.140625,
+          "compute_or_submit_us": 725.515625,
+          "event_record_us": 1.8203125
+        },
+        "local-cache-abba-0-primary27/CUDA1": {
+          "splits": 21.0,
+          "backend_calls": 21.0,
+          "source_wait_us": 0.109375,
+          "destination_wait_us": 42.0390625,
+          "copy_us": 218.6875,
+          "async_try_us": 452.07421875,
+          "prewait_us": 494.35546875,
+          "fences_us": 3.6015625,
+          "inputs_total_us": 1219.546875,
+          "compute_or_submit_us": 253.32421875,
+          "event_record_us": 0.40234375
+        },
+        "local-cache-abba-1-layer44/CPU": {
+          "splits": 93.0,
+          "backend_calls": 93.0,
+          "source_wait_us": 17241.92578125,
+          "destination_wait_us": 2.10546875,
+          "copy_us": 929.984375,
+          "async_try_us": 1.7578125,
+          "prewait_us": 1.93359375,
+          "fences_us": 13.54296875,
+          "inputs_total_us": 18208.93359375,
+          "compute_or_submit_us": 12426.45703125,
+          "event_record_us": 2.609375
+        },
+        "local-cache-abba-1-layer44/CUDA0": {
+          "splits": 53.0,
+          "backend_calls": 53.0,
+          "source_wait_us": 0.79296875,
+          "destination_wait_us": 8.15625,
+          "copy_us": 712.57421875,
+          "async_try_us": 3.515625,
+          "prewait_us": 92.3359375,
+          "fences_us": 11.11328125,
+          "inputs_total_us": 834.828125,
+          "compute_or_submit_us": 464.72265625,
+          "event_record_us": 1.12109375
+        },
+        "local-cache-abba-1-layer44/CUDA1": {
+          "splits": 41.0,
+          "backend_calls": 41.0,
+          "source_wait_us": 0.57421875,
+          "destination_wait_us": 7.1640625,
+          "copy_us": 908.00390625,
+          "async_try_us": 64.51171875,
+          "prewait_us": 223.48046875,
+          "fences_us": 8.34765625,
+          "inputs_total_us": 1219.7421875,
+          "compute_or_submit_us": 376.99609375,
+          "event_record_us": 0.8203125
+        },
+        "local-cache-abba-2-layer44/CPU": {
+          "splits": 93.0,
+          "backend_calls": 93.0,
+          "source_wait_us": 17255.91015625,
+          "destination_wait_us": 1.9609375,
+          "copy_us": 954.40625,
+          "async_try_us": 1.671875,
+          "prewait_us": 1.9765625,
+          "fences_us": 13.59375,
+          "inputs_total_us": 18247.921875,
+          "compute_or_submit_us": 12428.7109375,
+          "event_record_us": 2.49609375
+        },
+        "local-cache-abba-2-layer44/CUDA0": {
+          "splits": 53.0,
+          "backend_calls": 53.0,
+          "source_wait_us": 0.80859375,
+          "destination_wait_us": 8.05859375,
+          "copy_us": 696.11328125,
+          "async_try_us": 3.53515625,
+          "prewait_us": 95.046875,
+          "fences_us": 11.37109375,
+          "inputs_total_us": 821.31640625,
+          "compute_or_submit_us": 466.80859375,
+          "event_record_us": 1.15234375
+        },
+        "local-cache-abba-2-layer44/CUDA1": {
+          "splits": 41.0,
+          "backend_calls": 41.0,
+          "source_wait_us": 0.5546875,
+          "destination_wait_us": 7.3203125,
+          "copy_us": 890.92578125,
+          "async_try_us": 63.84765625,
+          "prewait_us": 227.15234375,
+          "fences_us": 8.578125,
+          "inputs_total_us": 1204.96484375,
+          "compute_or_submit_us": 395.265625,
+          "event_record_us": 0.78125
+        },
+        "local-cache-abba-3-primary27/CPU": {
+          "splits": 93.0,
+          "backend_calls": 93.0,
+          "source_wait_us": 17986.1015625,
+          "destination_wait_us": 1.7109375,
+          "copy_us": 884.75390625,
+          "async_try_us": 1.609375,
+          "prewait_us": 1.734375,
+          "fences_us": 13.796875,
+          "inputs_total_us": 18905.23828125,
+          "compute_or_submit_us": 14104.71484375,
+          "event_record_us": 2.46484375
+        },
+        "local-cache-abba-3-primary27/CUDA0": {
+          "splits": 93.0,
+          "backend_calls": 93.0,
+          "source_wait_us": 1.078125,
+          "destination_wait_us": 10.47265625,
+          "copy_us": 1008.9296875,
+          "async_try_us": 1142.8515625,
+          "prewait_us": 570.41796875,
+          "fences_us": 17.80078125,
+          "inputs_total_us": 2773.06640625,
+          "compute_or_submit_us": 696.36328125,
+          "event_record_us": 1.87890625
+        },
+        "local-cache-abba-3-primary27/CUDA1": {
+          "splits": 21.0,
+          "backend_calls": 21.0,
+          "source_wait_us": 0.14453125,
+          "destination_wait_us": 39.6953125,
+          "copy_us": 221.0859375,
+          "async_try_us": 432.9296875,
+          "prewait_us": 498.41015625,
+          "fences_us": 3.8125,
+          "inputs_total_us": 1203.796875,
+          "compute_or_submit_us": 242.796875,
+          "event_record_us": 0.4296875
+        }
+      },
+      "outside_splits_us_per_token": {
+        "local-cache-abba-0-primary27": 3860.43359375,
+        "local-cache-abba-1-layer44": 3900.1328125,
+        "local-cache-abba-2-layer44": 3925.34375,
+        "local-cache-abba-3-primary27": 3815.234375
+      },
+      "cpu_per_token": {
+        "local-cache-abba-0-primary27": {
+          "all_ops_us": 14200.0546875,
+          "moe_us": 14048.4375,
+          "moe_ops": 138.0,
+          "logical_bytes": 819635200.0,
+          "routes": 1380.0,
+          "misses": 788.56640625
+        },
+        "local-cache-abba-1-layer44": {
+          "all_ops_us": 11752.80078125,
+          "moe_us": 11584.41015625,
+          "moe_ops": 138.0,
+          "logical_bytes": 644437200.0,
+          "routes": 1380.0,
+          "misses": 619.60546875
+        },
+        "local-cache-abba-2-layer44": {
+          "all_ops_us": 11747.171875,
+          "moe_us": 11585.5859375,
+          "moe_ops": 138.0,
+          "logical_bytes": 643494000.0,
+          "routes": 1380.0,
+          "misses": 618.69140625
+        },
+        "local-cache-abba-3-primary27": {
+          "all_ops_us": 13280.1796875,
+          "moe_us": 13143.58203125,
+          "moe_ops": 138.0,
+          "logical_bytes": 819695200.0,
+          "routes": 1380.0,
+          "misses": 788.6484375
+        }
+      }
+    }
+  },
+  "n1-screen": {
+    "runs": [
+      {
+        "label": "n1-screen-0-n1-t24",
+        "threads": 24,
+        "variant": "n1",
+        "compact": false,
+        "batch_d2h": false,
+        "serial": false,
+        "output": "G:\\qwenllamaMTP\\perf-20260911\\bench\\decode-optimization-20261108\\n1-screen\\result-0-n1-t24.json",
+        "measured_tokens": 256,
+        "measured_us": 11335886.0,
+        "tps": 22.58314877196189,
+        "max_logit_delta": 5.936618804931641,
+        "relative_l2": 0.07221730203705547,
+        "different_logits": 79462363,
+        "argmax_different": 16,
+        "nonfinite": 0
+      },
+      {
+        "label": "n1-screen-1-compact-n1-t24",
+        "threads": 24,
+        "variant": "compact-n1",
+        "compact": true,
+        "batch_d2h": false,
+        "serial": false,
+        "output": "G:\\qwenllamaMTP\\perf-20260911\\bench\\decode-optimization-20261108\\n1-screen\\result-1-compact-n1-t24.json",
+        "measured_tokens": 256,
+        "measured_us": 11717918.0,
+        "tps": 21.846884403867648,
+        "max_logit_delta": 4.366860866546631,
+        "relative_l2": 0.07010816663497839,
+        "different_logits": 79462349,
+        "argmax_different": 19,
+        "nonfinite": 0
+      },
+      {
+        "label": "n1-screen-2-combined-t24",
+        "threads": 24,
+        "variant": "combined",
+        "compact": true,
+        "batch_d2h": true,
+        "serial": false,
+        "output": "G:\\qwenllamaMTP\\perf-20260911\\bench\\decode-optimization-20261108\\n1-screen\\result-2-combined-t24.json",
+        "measured_tokens": 256,
+        "measured_us": 11877723.0,
+        "tps": 21.552952531390066,
+        "max_logit_delta": 6.36650013923645,
+        "relative_l2": 0.0778022628400206,
+        "different_logits": 79462365,
+        "argmax_different": 12,
+        "nonfinite": 0
+      },
+      {
+        "label": "n1-screen-3-n1-t8",
+        "threads": 8,
+        "variant": "n1",
+        "compact": false,
+        "batch_d2h": false,
+        "serial": false,
+        "output": "G:\\qwenllamaMTP\\perf-20260911\\bench\\decode-optimization-20261108\\n1-screen\\result-3-n1-t8.json",
+        "measured_tokens": 256,
+        "measured_us": 10800068.0,
+        "tps": 23.703554459101554,
+        "max_logit_delta": 6.566252827644348,
+        "relative_l2": 0.07143859134482343,
+        "different_logits": 79462355,
+        "argmax_different": 15,
+        "nonfinite": 0
+      },
+      {
+        "label": "n1-screen-4-compact-n1-t8",
+        "threads": 8,
+        "variant": "compact-n1",
+        "compact": true,
+        "batch_d2h": false,
+        "serial": false,
+        "output": "G:\\qwenllamaMTP\\perf-20260911\\bench\\decode-optimization-20261108\\n1-screen\\result-4-compact-n1-t8.json",
+        "measured_tokens": 256,
+        "measured_us": 11570619.0,
+        "tps": 22.125004721009308,
+        "max_logit_delta": 3.8164496421813965,
+        "relative_l2": 0.06695216891178565,
+        "different_logits": 79462333,
+        "argmax_different": 16,
+        "nonfinite": 0
+      },
+      {
+        "label": "n1-screen-5-combined-t8",
+        "threads": 8,
+        "variant": "combined",
+        "compact": true,
+        "batch_d2h": true,
+        "serial": false,
+        "output": "G:\\qwenllamaMTP\\perf-20260911\\bench\\decode-optimization-20261108\\n1-screen\\result-5-combined-t8.json",
+        "measured_tokens": 256,
+        "measured_us": 11386923.0,
+        "tps": 22.481929490521715,
+        "max_logit_delta": 4.245860159397125,
+        "relative_l2": 0.06825137519523689,
+        "different_logits": 79462363,
+        "argmax_different": 15,
+        "nonfinite": 0
+      }
+    ],
+    "by_threads": {
+      "8": {
+        "count": 3,
+        "mean_tps": 22.77016289021086,
+        "min_tps": 22.125004721009308,
+        "max_tps": 23.703554459101554,
+        "stdev_tps": 0.8278065525411392
+      },
+      "24": {
+        "count": 3,
+        "mean_tps": 21.9943285690732,
+        "min_tps": 21.552952531390066,
+        "max_tps": 22.58314877196189,
+        "stdev_tps": 0.5306890896861859
+      }
+    },
+    "by_case": {
+      "n1-t24-0": 22.58314877196189,
+      "compact-n1-t24-1": 21.846884403867648,
+      "combined-t24-2": 21.552952531390066,
+      "n1-t8-3": 23.703554459101554,
+      "compact-n1-t8-4": 22.125004721009308,
+      "combined-t8-5": 22.481929490521715
+    },
+    "profile": {
+      "per_token": {
+        "n1-screen-0-n1-t24/CPU": {
+          "splits": 93.0,
+          "backend_calls": 93.0,
+          "source_wait_us": 17690.1953125,
+          "destination_wait_us": 2.5,
+          "copy_us": 1110.00390625,
+          "async_try_us": 4.75,
+          "prewait_us": 0.0,
+          "fences_us": 26.59765625,
+          "inputs_total_us": 18851.7421875,
+          "compute_or_submit_us": 14497.21484375,
+          "event_record_us": 7.18359375
+        },
+        "n1-screen-0-n1-t24/CUDA0": {
+          "splits": 93.0,
+          "backend_calls": 93.0,
+          "source_wait_us": 1.578125,
+          "destination_wait_us": 18.1796875,
+          "copy_us": 1146.2578125,
+          "async_try_us": 2116.19921875,
+          "prewait_us": 0.0,
+          "fences_us": 30.62109375,
+          "inputs_total_us": 3705.34765625,
+          "compute_or_submit_us": 1131.0625,
+          "event_record_us": 4.765625
+        },
+        "n1-screen-0-n1-t24/CUDA1": {
+          "splits": 22.0,
+          "backend_calls": 22.0,
+          "source_wait_us": 0.2109375,
+          "destination_wait_us": 2.72265625,
+          "copy_us": 124.7265625,
+          "async_try_us": 801.06640625,
+          "prewait_us": 0.0,
+          "fences_us": 6.7890625,
+          "inputs_total_us": 1327.9140625,
+          "compute_or_submit_us": 408.08203125,
+          "event_record_us": 1.16015625
+        },
+        "n1-screen-1-compact-n1-t24/CPU": {
+          "splits": 47.0,
+          "backend_calls": 47.0,
+          "source_wait_us": 11136.4296875,
+          "destination_wait_us": 3.375,
+          "copy_us": 1202.26171875,
+          "async_try_us": 4.94140625,
+          "prewait_us": 0.0,
+          "fences_us": 16.890625,
+          "inputs_total_us": 12396.4765625,
+          "compute_or_submit_us": 13627.49609375,
+          "event_record_us": 4.40234375
+        },
+        "n1-screen-1-compact-n1-t24/CUDA0": {
+          "splits": 68.0,
+          "backend_calls": 68.0,
+          "source_wait_us": 1.6875,
+          "destination_wait_us": 17.1875,
+          "copy_us": 1215.7890625,
+          "async_try_us": 2101.53125,
+          "prewait_us": 0.0,
+          "fences_us": 24.36328125,
+          "inputs_total_us": 12600.38671875,
+          "compute_or_submit_us": 976.48828125,
+          "event_record_us": 3.9609375
+        },
+        "n1-screen-1-compact-n1-t24/CUDA1": {
+          "splits": 22.0,
+          "backend_calls": 22.0,
+          "source_wait_us": 0.1640625,
+          "destination_wait_us": 2.83984375,
+          "copy_us": 124.95703125,
+          "async_try_us": 827.79296875,
+          "prewait_us": 0.0,
+          "fences_us": 7.0390625,
+          "inputs_total_us": 1346.46875,
+          "compute_or_submit_us": 388.76171875,
+          "event_record_us": 1.1328125
+        },
+        "n1-screen-2-combined-t24/CPU": {
+          "splits": 47.0,
+          "backend_calls": 47.0,
+          "source_wait_us": 11835.23046875,
+          "destination_wait_us": 0.0,
+          "copy_us": 0.0,
+          "async_try_us": 564.58203125,
+          "prewait_us": 0.0,
+          "fences_us": 17.1640625,
+          "inputs_total_us": 12430.98046875,
+          "compute_or_submit_us": 13967.453125,
+          "event_record_us": 4.4453125
+        },
+        "n1-screen-2-combined-t24/CUDA0": {
+          "splits": 68.0,
+          "backend_calls": 68.0,
+          "source_wait_us": 1.609375,
+          "destination_wait_us": 19.0390625,
+          "copy_us": 1236.6796875,
+          "async_try_us": 2111.234375,
+          "prewait_us": 0.0,
+          "fences_us": 24.90625,
+          "inputs_total_us": 12760.16015625,
+          "compute_or_submit_us": 985.49609375,
+          "event_record_us": 3.65625
+        },
+        "n1-screen-2-combined-t24/CUDA1": {
+          "splits": 22.0,
+          "backend_calls": 22.0,
+          "source_wait_us": 0.1875,
+          "destination_wait_us": 3.1015625,
+          "copy_us": 130.2109375,
+          "async_try_us": 839.40625,
+          "prewait_us": 0.0,
+          "fences_us": 7.078125,
+          "inputs_total_us": 1408.98046875,
+          "compute_or_submit_us": 395.34375,
+          "event_record_us": 1.1796875
+        },
+        "n1-screen-3-n1-t8/CPU": {
+          "splits": 93.0,
+          "backend_calls": 93.0,
+          "source_wait_us": 18044.34375,
+          "destination_wait_us": 1.671875,
+          "copy_us": 887.66796875,
+          "async_try_us": 1.5625,
+          "prewait_us": 0.0,
+          "fences_us": 14.25,
+          "inputs_total_us": 18964.234375,
+          "compute_or_submit_us": 14309.15234375,
+          "event_record_us": 2.953125
+        },
+        "n1-screen-3-n1-t8/CUDA0": {
+          "splits": 93.0,
+          "backend_calls": 93.0,
+          "source_wait_us": 1.05859375,
+          "destination_wait_us": 9.3671875,
+          "copy_us": 945.5546875,
+          "async_try_us": 1162.421875,
+          "prewait_us": 0.0,
+          "fences_us": 18.53515625,
+          "inputs_total_us": 2844.9375,
+          "compute_or_submit_us": 682.4296875,
+          "event_record_us": 2.1875
+        },
+        "n1-screen-3-n1-t8/CUDA1": {
+          "splits": 22.0,
+          "backend_calls": 22.0,
+          "source_wait_us": 0.1484375,
+          "destination_wait_us": 1.609375,
+          "copy_us": 105.5703125,
+          "async_try_us": 454.8203125,
+          "prewait_us": 0.0,
+          "fences_us": 4.1796875,
+          "inputs_total_us": 1232.62890625,
+          "compute_or_submit_us": 253.59375,
+          "event_record_us": 0.4296875
+        },
+        "n1-screen-4-compact-n1-t8/CPU": {
+          "splits": 47.0,
+          "backend_calls": 47.0,
+          "source_wait_us": 11125.67578125,
+          "destination_wait_us": 1.73828125,
+          "copy_us": 1124.69921875,
+          "async_try_us": 1.67578125,
+          "prewait_us": 0.0,
+          "fences_us": 9.66015625,
+          "inputs_total_us": 12282.19140625,
+          "compute_or_submit_us": 15032.0703125,
+          "event_record_us": 1.91796875
+        },
+        "n1-screen-4-compact-n1-t8/CUDA0": {
+          "splits": 68.0,
+          "backend_calls": 68.0,
+          "source_wait_us": 1.01953125,
+          "destination_wait_us": 9.2421875,
+          "copy_us": 980.8984375,
+          "async_try_us": 1223.89453125,
+          "prewait_us": 0.0,
+          "fences_us": 15.28515625,
+          "inputs_total_us": 11860.43359375,
+          "compute_or_submit_us": 600.2890625,
+          "event_record_us": 1.5546875
+        },
+        "n1-screen-4-compact-n1-t8/CUDA1": {
+          "splits": 22.0,
+          "backend_calls": 22.0,
+          "source_wait_us": 0.14453125,
+          "destination_wait_us": 1.81640625,
+          "copy_us": 106.25,
+          "async_try_us": 463.0,
+          "prewait_us": 0.0,
+          "fences_us": 4.30078125,
+          "inputs_total_us": 1233.453125,
+          "compute_or_submit_us": 260.94921875,
+          "event_record_us": 0.578125
+        },
+        "n1-screen-5-combined-t8/CPU": {
+          "splits": 47.0,
+          "backend_calls": 47.0,
+          "source_wait_us": 11935.08984375,
+          "destination_wait_us": 0.0,
+          "copy_us": 0.0,
+          "async_try_us": 269.94921875,
+          "prewait_us": 0.0,
+          "fences_us": 9.203125,
+          "inputs_total_us": 12228.19921875,
+          "compute_or_submit_us": 14349.62890625,
+          "event_record_us": 2.05078125
+        },
+        "n1-screen-5-combined-t8/CUDA0": {
+          "splits": 68.0,
+          "backend_calls": 68.0,
+          "source_wait_us": 1.12109375,
+          "destination_wait_us": 9.44921875,
+          "copy_us": 1023.8046875,
+          "async_try_us": 1205.41796875,
+          "prewait_us": 0.0,
+          "fences_us": 14.01953125,
+          "inputs_total_us": 11889.03125,
+          "compute_or_submit_us": 598.88671875,
+          "event_record_us": 1.421875
+        },
+        "n1-screen-5-combined-t8/CUDA1": {
+          "splits": 22.0,
+          "backend_calls": 22.0,
+          "source_wait_us": 0.140625,
+          "destination_wait_us": 1.47265625,
+          "copy_us": 110.06640625,
+          "async_try_us": 452.8515625,
+          "prewait_us": 0.0,
+          "fences_us": 3.82421875,
+          "inputs_total_us": 1250.90234375,
+          "compute_or_submit_us": 257.55078125,
+          "event_record_us": 0.48828125
+        }
+      },
+      "outside_splits_us_per_token": {
+        "n1-screen-0-n1-t24": 4282.32421875,
+        "n1-screen-1-compact-n1-t24": 4379.25,
+        "n1-screen-2-combined-t24": 4390.51171875,
+        "n1-screen-3-n1-t8": 3858.25390625,
+        "n1-screen-4-compact-n1-t8": 3895.046875,
+        "n1-screen-5-combined-t8": 3874.9609375
+      }
+    }
+  },
+  "nsight-nodes-stock8": {
+    "runs": [
+      {
+        "label": "nsight-nodes-stock8-0-stock-t8",
+        "threads": 8,
+        "variant": "stock",
+        "compact": false,
+        "batch_d2h": false,
+        "serial": false,
+        "output": "G:\\qwenllamaMTP\\perf-20260911\\bench\\decode-optimization-20261108\\nsight-nodes-stock8\\result-0-stock-t8.json",
+        "measured_tokens": 256,
+        "measured_us": 18520022.0,
+        "tps": 13.822877748201378,
+        "max_logit_delta": 3.336268901824951,
+        "relative_l2": 0.0647437963186348,
+        "different_logits": 79462351,
+        "argmax_different": 13,
+        "nonfinite": 0
+      }
+    ],
+    "by_threads": {
+      "8": {
+        "count": 1,
+        "mean_tps": 13.822877748201378,
+        "min_tps": 13.822877748201378,
+        "max_tps": 13.822877748201378,
+        "stdev_tps": null
+      }
+    }
+  },
+  "phase-fast-prefill-abba": {
+    "runs": [
+      {
+        "label": "phase-fast-prefill-abba-0-phase0",
+        "threads": 8,
+        "variant": "n1",
+        "compact": false,
+        "batch_d2h": false,
+        "serial": false,
+        "output": "G:\\qwenllamaMTP\\perf-20260911\\bench\\decode-optimization-20261108\\phase-fast-prefill-abba\\result-0-phase0.json",
+        "phase_layout": false,
+        "prefill_us": 18529418,
+        "measured_tokens": 256,
+        "measured_us": 10817801.0,
+        "tps": 23.664698583381224,
+        "max_logit_delta": 6.433708667755127,
+        "relative_l2": 0.07237525296238571,
+        "different_logits": 79462355,
+        "argmax_different": 9,
+        "nonfinite": 0,
+        "first_decode_us": 735317,
+        "prefill_plus_first_decode_us": 19264735,
+        "reentry": [
+          {
+            "prompt_tokens": 49,
+            "prefill_us": 1677214,
+            "first_decode_us": 63989,
+            "decode_tokens": 64,
+            "last32_tps": 23.16834335484852,
+            "relative_l2": 0.0,
+            "max_logit_delta": 0.0,
+            "argmax_different": 0,
+            "nonfinite": 0
+          },
+          {
+            "prompt_tokens": 4096,
+            "prefill_us": 9192302,
+            "first_decode_us": 629932,
+            "decode_tokens": 64,
+            "last32_tps": 21.503439878398048,
+            "relative_l2": 0.0,
+            "max_logit_delta": 0.0,
+            "argmax_different": 0,
+            "nonfinite": 0
+          }
+        ]
+      },
+      {
+        "label": "phase-fast-prefill-abba-1-phase1",
+        "threads": 8,
+        "variant": "n1",
+        "compact": false,
+        "batch_d2h": false,
+        "serial": false,
+        "output": "G:\\qwenllamaMTP\\perf-20260911\\bench\\decode-optimization-20261108\\phase-fast-prefill-abba\\result-1-phase1.json",
+        "phase_layout": true,
+        "prefill_us": 18278009,
+        "measured_tokens": 256,
+        "measured_us": 9309237.0,
+        "tps": 27.499568439389822,
+        "max_logit_delta": 6.6124314069747925,
+        "relative_l2": 0.0789704645523715,
+        "different_logits": 79462358,
+        "argmax_different": 14,
+        "nonfinite": 0,
+        "first_decode_us": 2692858,
+        "prefill_plus_first_decode_us": 20970867,
+        "reentry": [
+          {
+            "prompt_tokens": 49,
+            "prefill_us": 1688581,
+            "first_decode_us": 72894,
+            "decode_tokens": 64,
+            "last32_tps": 26.414430863941742,
+            "relative_l2": 0.13637488066111145,
+            "max_logit_delta": 5.51788067817688,
+            "argmax_different": 0,
+            "nonfinite": 0
+          },
+          {
+            "prompt_tokens": 4096,
+            "prefill_us": 10548384,
+            "first_decode_us": 2547488,
+            "decode_tokens": 64,
+            "last32_tps": 24.297627716303936,
+            "relative_l2": 0.11827314381014942,
+            "max_logit_delta": 4.722966372966766,
+            "argmax_different": 0,
+            "nonfinite": 0
+          }
+        ]
+      },
+      {
+        "label": "phase-fast-prefill-abba-2-phase1",
+        "threads": 8,
+        "variant": "n1",
+        "compact": false,
+        "batch_d2h": false,
+        "serial": false,
+        "output": "G:\\qwenllamaMTP\\perf-20260911\\bench\\decode-optimization-20261108\\phase-fast-prefill-abba\\result-2-phase1.json",
+        "phase_layout": true,
+        "prefill_us": 18073504,
+        "measured_tokens": 256,
+        "measured_us": 9356959.0,
+        "tps": 27.35931620519017,
+        "max_logit_delta": 6.529357671737671,
+        "relative_l2": 0.07699408540440951,
+        "different_logits": 79462347,
+        "argmax_different": 12,
+        "nonfinite": 0,
+        "first_decode_us": 2636831,
+        "prefill_plus_first_decode_us": 20710335,
+        "reentry": [
+          {
+            "prompt_tokens": 49,
+            "prefill_us": 1711430,
+            "first_decode_us": 63364,
+            "decode_tokens": 64,
+            "last32_tps": 26.74540961012715,
+            "relative_l2": 0.14627091027287872,
+            "max_logit_delta": 6.4264808893203735,
+            "argmax_different": 0,
+            "nonfinite": 0
+          },
+          {
+            "prompt_tokens": 4096,
+            "prefill_us": 10589131,
+            "first_decode_us": 2679597,
+            "decode_tokens": 64,
+            "last32_tps": 23.954175661958672,
+            "relative_l2": 0.1330314330279607,
+            "max_logit_delta": 5.380620330572128,
+            "argmax_different": 0,
+            "nonfinite": 0
+          }
+        ]
+      },
+      {
+        "label": "phase-fast-prefill-abba-3-phase0",
+        "threads": 8,
+        "variant": "n1",
+        "compact": false,
+        "batch_d2h": false,
+        "serial": false,
+        "output": "G:\\qwenllamaMTP\\perf-20260911\\bench\\decode-optimization-20261108\\phase-fast-prefill-abba\\result-3-phase0.json",
+        "phase_layout": false,
+        "prefill_us": 18097332,
+        "measured_tokens": 256,
+        "measured_us": 10810983.0,
+        "tps": 23.67962284280717,
+        "max_logit_delta": 4.347263872623444,
+        "relative_l2": 0.07063397984563609,
+        "different_logits": 79462347,
+        "argmax_different": 8,
+        "nonfinite": 0,
+        "first_decode_us": 638965,
+        "prefill_plus_first_decode_us": 18736297,
+        "reentry": [
+          {
+            "prompt_tokens": 49,
+            "prefill_us": 1719097,
+            "first_decode_us": 66461,
+            "decode_tokens": 64,
+            "last32_tps": 23.273962908576237,
+            "relative_l2": 0.12698108563213703,
+            "max_logit_delta": 7.565337538719177,
+            "argmax_different": 0,
+            "nonfinite": 0
+          },
+          {
+            "prompt_tokens": 4096,
+            "prefill_us": 9087383,
+            "first_decode_us": 634864,
+            "decode_tokens": 64,
+            "last32_tps": 21.58810171773827,
+            "relative_l2": 0.13792304644406,
+            "max_logit_delta": 9.129056483507156,
+            "argmax_different": 0,
+            "nonfinite": 0
+          }
+        ]
+      }
+    ],
+    "by_threads": {
+      "8": {
+        "count": 4,
+        "mean_tps": 25.550801517692097,
+        "min_tps": 23.664698583381224,
+        "max_tps": 27.499568439389822,
+        "stdev_tps": 2.1700316281995886
+      }
+    },
+    "by_case": {
+      "n1-t8-0": 23.664698583381224,
+      "n1-t8-1": 27.499568439389822,
+      "n1-t8-2": 27.35931620519017,
+      "n1-t8-3": 23.67962284280717
+    },
+    "profile": {
+      "per_token": {
+        "phase-fast-prefill-abba-0-phase0/CPU": {
+          "splits": 93.0,
+          "backend_calls": 93.0,
+          "source_wait_us": 18044.14453125,
+          "destination_wait_us": 1.80078125,
+          "copy_us": 920.23828125,
+          "async_try_us": 1.51171875,
+          "prewait_us": 1.67578125,
+          "fences_us": 15.171875,
+          "inputs_total_us": 18999.79296875,
+          "compute_or_submit_us": 14287.484375,
+          "event_record_us": 2.91015625
+        },
+        "phase-fast-prefill-abba-0-phase0/CUDA0": {
+          "splits": 93.0,
+          "backend_calls": 93.0,
+          "source_wait_us": 1.00390625,
+          "destination_wait_us": 10.734375,
+          "copy_us": 1002.82421875,
+          "async_try_us": 1195.21875,
+          "prewait_us": 613.24609375,
+          "fences_us": 18.74609375,
+          "inputs_total_us": 2863.1953125,
+          "compute_or_submit_us": 719.109375,
+          "event_record_us": 2.2421875
+        },
+        "phase-fast-prefill-abba-0-phase0/CUDA1": {
+          "splits": 22.0,
+          "backend_calls": 22.0,
+          "source_wait_us": 0.1875,
+          "destination_wait_us": 38.26953125,
+          "copy_us": 223.46875,
+          "async_try_us": 456.33203125,
+          "prewait_us": 505.83984375,
+          "fences_us": 4.0078125,
+          "inputs_total_us": 1236.484375,
+          "compute_or_submit_us": 244.33203125,
+          "event_record_us": 0.5625
+        },
+        "phase-fast-prefill-abba-1-phase1/CPU": {
+          "splits": 93.0,
+          "backend_calls": 93.0,
+          "source_wait_us": 17241.30859375,
+          "destination_wait_us": 1.875,
+          "copy_us": 878.46484375,
+          "async_try_us": 1.59375,
+          "prewait_us": 1.734375,
+          "fences_us": 12.21484375,
+          "inputs_total_us": 18155.49609375,
+          "compute_or_submit_us": 11544.2265625,
+          "event_record_us": 2.53125
+        },
+        "phase-fast-prefill-abba-1-phase1/CUDA0": {
+          "splits": 51.0,
+          "backend_calls": 51.0,
+          "source_wait_us": 0.62890625,
+          "destination_wait_us": 7.11328125,
+          "copy_us": 681.546875,
+          "async_try_us": 2.87109375,
+          "prewait_us": 95.75,
+          "fences_us": 9.9140625,
+          "inputs_total_us": 804.28515625,
+          "compute_or_submit_us": 412.6796875,
+          "event_record_us": 1.10546875
+        },
+        "phase-fast-prefill-abba-1-phase1/CUDA1": {
+          "splits": 43.0,
+          "backend_calls": 43.0,
+          "source_wait_us": 0.453125,
+          "destination_wait_us": 6.859375,
+          "copy_us": 912.66796875,
+          "async_try_us": 55.72265625,
+          "prewait_us": 243.6171875,
+          "fences_us": 8.08203125,
+          "inputs_total_us": 1233.9140625,
+          "compute_or_submit_us": 355.4765625,
+          "event_record_us": 0.9453125
+        },
+        "phase-fast-prefill-abba-2-phase1/CPU": {
+          "splits": 93.0,
+          "backend_calls": 93.0,
+          "source_wait_us": 17244.55078125,
+          "destination_wait_us": 1.90625,
+          "copy_us": 870.6328125,
+          "async_try_us": 1.74609375,
+          "prewait_us": 1.640625,
+          "fences_us": 12.34765625,
+          "inputs_total_us": 18151.0859375,
+          "compute_or_submit_us": 11649.00390625,
+          "event_record_us": 2.57421875
+        },
+        "phase-fast-prefill-abba-2-phase1/CUDA0": {
+          "splits": 51.0,
+          "backend_calls": 51.0,
+          "source_wait_us": 0.6640625,
+          "destination_wait_us": 7.59375,
+          "copy_us": 667.125,
+          "async_try_us": 2.625,
+          "prewait_us": 95.9921875,
+          "fences_us": 10.26171875,
+          "inputs_total_us": 791.078125,
+          "compute_or_submit_us": 413.86328125,
+          "event_record_us": 1.2265625
+        },
+        "phase-fast-prefill-abba-2-phase1/CUDA1": {
+          "splits": 43.0,
+          "backend_calls": 43.0,
+          "source_wait_us": 0.578125,
+          "destination_wait_us": 6.9921875,
+          "copy_us": 917.34765625,
+          "async_try_us": 56.73828125,
+          "prewait_us": 242.37890625,
+          "fences_us": 8.25,
+          "inputs_total_us": 1238.44921875,
+          "compute_or_submit_us": 357.80859375,
+          "event_record_us": 0.84375
+        },
+        "phase-fast-prefill-abba-3-phase0/CPU": {
+          "splits": 93.0,
+          "backend_calls": 93.0,
+          "source_wait_us": 18060.265625,
+          "destination_wait_us": 1.7890625,
+          "copy_us": 912.65625,
+          "async_try_us": 1.79296875,
+          "prewait_us": 1.87109375,
+          "fences_us": 14.13671875,
+          "inputs_total_us": 19010.5078125,
+          "compute_or_submit_us": 14226.25,
+          "event_record_us": 2.7265625
+        },
+        "phase-fast-prefill-abba-3-phase0/CUDA0": {
+          "splits": 93.0,
+          "backend_calls": 93.0,
+          "source_wait_us": 1.05859375,
+          "destination_wait_us": 12.15625,
+          "copy_us": 1014.8671875,
+          "async_try_us": 1205.7734375,
+          "prewait_us": 608.33203125,
+          "fences_us": 18.4296875,
+          "inputs_total_us": 2884.0859375,
+          "compute_or_submit_us": 681.796875,
+          "event_record_us": 2.39453125
+        },
+        "phase-fast-prefill-abba-3-phase0/CUDA1": {
+          "splits": 22.0,
+          "backend_calls": 22.0,
+          "source_wait_us": 0.140625,
+          "destination_wait_us": 39.65234375,
+          "copy_us": 221.68359375,
+          "async_try_us": 451.72265625,
+          "prewait_us": 512.5625,
+          "fences_us": 3.8515625,
+          "inputs_total_us": 1237.984375,
+          "compute_or_submit_us": 261.81640625,
+          "event_record_us": 0.50390625
+        }
+      },
+      "outside_splits_us_per_token": {
+        "phase-fast-prefill-abba-0-phase0": 3862.99609375,
+        "phase-fast-prefill-abba-1-phase1": 3823.3359375,
+        "phase-fast-prefill-abba-2-phase1": 3913.828125,
+        "phase-fast-prefill-abba-3-phase0": 3885.91796875
+      },
+      "cpu_per_token": {
+        "phase-fast-prefill-abba-0-phase0": {
+          "all_ops_us": 13283.9453125,
+          "moe_us": 13136.640625,
+          "moe_ops": 138.0,
+          "logical_bytes": 818475600.0,
+          "routes": 1380.0,
+          "misses": 787.44140625
+        },
+        "phase-fast-prefill-abba-1-phase1": {
+          "all_ops_us": 10900.1796875,
+          "moe_us": 10743.1953125,
+          "moe_ops": 138.0,
+          "logical_bytes": 642486800.0,
+          "routes": 1380.0,
+          "misses": 617.6484375
+        },
+        "phase-fast-prefill-abba-2-phase1": {
+          "all_ops_us": 10945.75,
+          "moe_us": 10786.83984375,
+          "moe_ops": 138.0,
+          "logical_bytes": 642794800.0,
+          "routes": 1380.0,
+          "misses": 617.98828125
+        },
+        "phase-fast-prefill-abba-3-phase0": {
+          "all_ops_us": 13288.34375,
+          "moe_us": 13144.2109375,
+          "moe_ops": 138.0,
+          "logical_bytes": 819406000.0,
+          "routes": 1380.0,
+          "misses": 788.3671875
+        }
+      }
+    }
+  },
+  "phase-fast-prefill-smoke": {
+    "runs": [
+      {
+        "label": "phase-fast-prefill-smoke-0-n1-t8",
+        "threads": 8,
+        "variant": "n1",
+        "compact": false,
+        "batch_d2h": false,
+        "serial": false,
+        "output": "G:\\qwenllamaMTP\\perf-20260911\\bench\\decode-optimization-20261108\\phase-fast-prefill-smoke\\result-0-n1-t8.json",
+        "prefill_us": 18390408,
+        "measured_tokens": 256,
+        "measured_us": 9310675.0,
+        "tps": 27.495321230737837,
+        "max_logit_delta": 5.878991365432739,
+        "relative_l2": 0.07479909913562416,
+        "different_logits": 79462364,
+        "argmax_different": 13,
+        "nonfinite": 0,
+        "first_decode_us": 2678743,
+        "prefill_plus_first_decode_us": 21069151,
+        "reentry_prefill_us": 10561229,
+        "reentry_decode_tokens": 64
+      }
+    ],
+    "by_threads": {
+      "8": {
+        "count": 1,
+        "mean_tps": 27.495321230737837,
+        "min_tps": 27.495321230737837,
+        "max_tps": 27.495321230737837,
+        "stdev_tps": null
+      }
+    },
+    "profile": {
+      "per_token": {
+        "phase-fast-prefill-smoke-0-n1-t8/CPU": {
+          "splits": 93.0,
+          "backend_calls": 93.0,
+          "source_wait_us": 17243.421875,
+          "destination_wait_us": 1.71875,
+          "copy_us": 935.9140625,
+          "async_try_us": 1.76171875,
+          "prewait_us": 1.69921875,
+          "fences_us": 12.69140625,
+          "inputs_total_us": 18214.703125,
+          "compute_or_submit_us": 11432.23828125,
+          "event_record_us": 2.9375
+        },
+        "phase-fast-prefill-smoke-0-n1-t8/CUDA0": {
+          "splits": 51.0,
+          "backend_calls": 51.0,
+          "source_wait_us": 0.640625,
+          "destination_wait_us": 7.5703125,
+          "copy_us": 653.734375,
+          "async_try_us": 2.66015625,
+          "prewait_us": 95.2734375,
+          "fences_us": 9.5859375,
+          "inputs_total_us": 776.4375,
+          "compute_or_submit_us": 413.89453125,
+          "event_record_us": 1.03125
+        },
+        "phase-fast-prefill-smoke-0-n1-t8/CUDA1": {
+          "splits": 43.0,
+          "backend_calls": 43.0,
+          "source_wait_us": 0.44921875,
+          "destination_wait_us": 6.8515625,
+          "copy_us": 932.6484375,
+          "async_try_us": 55.58984375,
+          "prewait_us": 249.07421875,
+          "fences_us": 7.640625,
+          "inputs_total_us": 1259.83203125,
+          "compute_or_submit_us": 382.43359375,
+          "event_record_us": 0.953125
+        }
+      },
+      "outside_splits_us_per_token": {
+        "phase-fast-prefill-smoke-0-n1-t8": 3855.4453125
+      },
+      "cpu_per_token": {
+        "phase-fast-prefill-smoke-0-n1-t8": {
+          "all_ops_us": 10760.29296875,
+          "moe_us": 10615.94140625,
+          "moe_ops": 138.0,
+          "logical_bytes": 642587600.0,
+          "routes": 1380.0,
+          "misses": 617.8359375
+        }
+      }
+    }
+  },
+  "refill-pipeline-screen": {
+    "runs": [
+      {
+        "label": "refill-pipeline-screen-0-a64-pipe0",
+        "threads": 8,
+        "variant": "n1",
+        "compact": false,
+        "batch_d2h": false,
+        "serial": false,
+        "output": "G:\\qwenllamaMTP\\perf-20260911\\bench\\decode-optimization-20261108\\refill-pipeline-screen\\result-0-a64-pipe0.json",
+        "admission_mib": 64,
+        "pipeline": false,
+        "measured_tokens": 256,
+        "measured_us": 11048162.0,
+        "tps": 23.17127500483791,
+        "max_logit_delta": 3.5637707710266113,
+        "relative_l2": 0.06309700058197963,
+        "different_logits": 79462357,
+        "argmax_different": 19,
+        "nonfinite": 0
+      },
+      {
+        "label": "refill-pipeline-screen-0-a64-pipe1",
+        "threads": 8,
+        "variant": "n1",
+        "compact": false,
+        "batch_d2h": false,
+        "serial": false,
+        "output": "G:\\qwenllamaMTP\\perf-20260911\\bench\\decode-optimization-20261108\\refill-pipeline-screen\\result-0-a64-pipe1.json",
+        "admission_mib": 64,
+        "pipeline": true,
+        "measured_tokens": 256,
+        "measured_us": 11080423.0,
+        "tps": 23.103811109016327,
+        "max_logit_delta": 6.558062672615051,
+        "relative_l2": 0.07294697403262322,
+        "different_logits": 79462347,
+        "argmax_different": 14,
+        "nonfinite": 0
+      },
+      {
+        "label": "refill-pipeline-screen-1-a8-pipe0",
+        "threads": 8,
+        "variant": "n1",
+        "compact": false,
+        "batch_d2h": false,
+        "serial": false,
+        "output": "G:\\qwenllamaMTP\\perf-20260911\\bench\\decode-optimization-20261108\\refill-pipeline-screen\\result-1-a8-pipe0.json",
+        "admission_mib": 8,
+        "pipeline": false,
+        "measured_tokens": 256,
+        "measured_us": 11720644.0,
+        "tps": 21.841803231972577,
+        "max_logit_delta": 4.067231893539429,
+        "relative_l2": 0.0689470504900153,
+        "different_logits": 79462352,
+        "argmax_different": 17,
+        "nonfinite": 0
+      },
+      {
+        "label": "refill-pipeline-screen-1-a8-pipe1",
+        "threads": 8,
+        "variant": "n1",
+        "compact": false,
+        "batch_d2h": false,
+        "serial": false,
+        "output": "G:\\qwenllamaMTP\\perf-20260911\\bench\\decode-optimization-20261108\\refill-pipeline-screen\\result-1-a8-pipe1.json",
+        "admission_mib": 8,
+        "pipeline": true,
+        "measured_tokens": 256,
+        "measured_us": 11819091.0,
+        "tps": 21.659872150912452,
+        "max_logit_delta": 2.731395721435547,
+        "relative_l2": 0.06582443054236528,
+        "different_logits": 79462359,
+        "argmax_different": 16,
+        "nonfinite": 0
+      }
+    ],
+    "by_threads": {
+      "8": {
+        "count": 4,
+        "mean_tps": 22.444190374184817,
+        "min_tps": 21.659872150912452,
+        "max_tps": 23.17127500483791,
+        "stdev_tps": 0.8045240660190249
+      }
+    },
+    "by_case": {
+      "n1-t8-0": 23.17127500483791,
+      "n1-t8-1": 23.103811109016327,
+      "n1-t8-2": 21.841803231972577,
+      "n1-t8-3": 21.659872150912452
+    },
+    "profile": {
+      "per_token": {
+        "refill-pipeline-screen-0-a64-pipe0/CPU": {
+          "splits": 93.0,
+          "backend_calls": 93.0,
+          "source_wait_us": 18021.3515625,
+          "destination_wait_us": 1.84765625,
+          "copy_us": 859.23046875,
+          "async_try_us": 1.7734375,
+          "prewait_us": 1.88671875,
+          "fences_us": 13.30078125,
+          "inputs_total_us": 18916.515625,
+          "compute_or_submit_us": 15290.1015625,
+          "event_record_us": 3.01171875
+        },
+        "refill-pipeline-screen-0-a64-pipe0/CUDA0": {
+          "splits": 93.0,
+          "backend_calls": 93.0,
+          "source_wait_us": 1.1640625,
+          "destination_wait_us": 11.19921875,
+          "copy_us": 1076.828125,
+          "async_try_us": 1229.04296875,
+          "prewait_us": 534.46875,
+          "fences_us": 19.375,
+          "inputs_total_us": 2893.83203125,
+          "compute_or_submit_us": 690.546875,
+          "event_record_us": 2.00390625
+        },
+        "refill-pipeline-screen-0-a64-pipe0/CUDA1": {
+          "splits": 22.0,
+          "backend_calls": 22.0,
+          "source_wait_us": 0.1640625,
+          "destination_wait_us": 40.1484375,
+          "copy_us": 209.08984375,
+          "async_try_us": 456.18359375,
+          "prewait_us": 505.515625,
+          "fences_us": 4.25390625,
+          "inputs_total_us": 1223.37109375,
+          "compute_or_submit_us": 259.66796875,
+          "event_record_us": 0.49609375
+        },
+        "refill-pipeline-screen-0-a64-pipe1/CPU": {
+          "splits": 93.0,
+          "backend_calls": 93.0,
+          "source_wait_us": 18047.80859375,
+          "destination_wait_us": 1.87109375,
+          "copy_us": 904.03515625,
+          "async_try_us": 1.75,
+          "prewait_us": 1.91015625,
+          "fences_us": 13.91015625,
+          "inputs_total_us": 18988.28125,
+          "compute_or_submit_us": 15230.7578125,
+          "event_record_us": 3.1796875
+        },
+        "refill-pipeline-screen-0-a64-pipe1/CUDA0": {
+          "splits": 93.0,
+          "backend_calls": 93.0,
+          "source_wait_us": 1.13671875,
+          "destination_wait_us": 12.3671875,
+          "copy_us": 1064.171875,
+          "async_try_us": 1215.90625,
+          "prewait_us": 575.48046875,
+          "fences_us": 18.75390625,
+          "inputs_total_us": 2910.734375,
+          "compute_or_submit_us": 693.38671875,
+          "event_record_us": 2.00390625
+        },
+        "refill-pipeline-screen-0-a64-pipe1/CUDA1": {
+          "splits": 22.0,
+          "backend_calls": 22.0,
+          "source_wait_us": 0.125,
+          "destination_wait_us": 39.90625,
+          "copy_us": 211.8125,
+          "async_try_us": 464.859375,
+          "prewait_us": 511.796875,
+          "fences_us": 3.78515625,
+          "inputs_total_us": 1241.19921875,
+          "compute_or_submit_us": 251.52734375,
+          "event_record_us": 0.484375
+        },
+        "refill-pipeline-screen-1-a8-pipe0/CPU": {
+          "splits": 93.0,
+          "backend_calls": 93.0,
+          "source_wait_us": 18046.2578125,
+          "destination_wait_us": 1.8828125,
+          "copy_us": 756.3203125,
+          "async_try_us": 1.85546875,
+          "prewait_us": 1.85546875,
+          "fences_us": 13.72265625,
+          "inputs_total_us": 18838.30078125,
+          "compute_or_submit_us": 18122.33984375,
+          "event_record_us": 3.44921875
+        },
+        "refill-pipeline-screen-1-a8-pipe0/CUDA0": {
+          "splits": 93.0,
+          "backend_calls": 93.0,
+          "source_wait_us": 1.11328125,
+          "destination_wait_us": 10.79296875,
+          "copy_us": 948.84375,
+          "async_try_us": 1252.796875,
+          "prewait_us": 477.5234375,
+          "fences_us": 21.2421875,
+          "inputs_total_us": 2733.8359375,
+          "compute_or_submit_us": 690.4609375,
+          "event_record_us": 1.94921875
+        },
+        "refill-pipeline-screen-1-a8-pipe0/CUDA1": {
+          "splits": 22.0,
+          "backend_calls": 22.0,
+          "source_wait_us": 0.1484375,
+          "destination_wait_us": 40.16796875,
+          "copy_us": 209.51953125,
+          "async_try_us": 469.97265625,
+          "prewait_us": 503.453125,
+          "fences_us": 4.1953125,
+          "inputs_total_us": 1236.32421875,
+          "compute_or_submit_us": 261.12109375,
+          "event_record_us": 0.44921875
+        },
+        "refill-pipeline-screen-1-a8-pipe1/CPU": {
+          "splits": 93.0,
+          "backend_calls": 93.0,
+          "source_wait_us": 18015.15234375,
+          "destination_wait_us": 1.984375,
+          "copy_us": 859.73046875,
+          "async_try_us": 2.5625,
+          "prewait_us": 1.71484375,
+          "fences_us": 15.81640625,
+          "inputs_total_us": 18913.3984375,
+          "compute_or_submit_us": 18075.0234375,
+          "event_record_us": 3.6953125
+        },
+        "refill-pipeline-screen-1-a8-pipe1/CUDA0": {
+          "splits": 93.0,
+          "backend_calls": 93.0,
+          "source_wait_us": 1.140625,
+          "destination_wait_us": 10.73046875,
+          "copy_us": 911.44921875,
+          "async_try_us": 1382.51953125,
+          "prewait_us": 487.40625,
+          "fences_us": 20.453125,
+          "inputs_total_us": 2838.5,
+          "compute_or_submit_us": 783.65234375,
+          "event_record_us": 2.953125
+        },
+        "refill-pipeline-screen-1-a8-pipe1/CUDA1": {
+          "splits": 22.0,
+          "backend_calls": 22.0,
+          "source_wait_us": 0.16015625,
+          "destination_wait_us": 42.7265625,
+          "copy_us": 237.23046875,
+          "async_try_us": 463.41796875,
+          "prewait_us": 490.875,
+          "fences_us": 4.328125,
+          "inputs_total_us": 1247.80078125,
+          "compute_or_submit_us": 348.41015625,
+          "event_record_us": 0.59765625
+        }
+      },
+      "outside_splits_us_per_token": {
+        "refill-pipeline-screen-0-a64-pipe0": 3840.40625,
+        "refill-pipeline-screen-0-a64-pipe1": 3924.8984375,
+        "refill-pipeline-screen-1-a8-pipe0": 3856.375,
+        "refill-pipeline-screen-1-a8-pipe1": 3913.6953125
+      },
+      "cpu_per_token": {
+        "refill-pipeline-screen-0-a64-pipe0": {
+          "all_ops_us": 14392.21875,
+          "moe_us": 14237.2578125,
+          "moe_ops": 138.0,
+          "logical_bytes": 817668400.0,
+          "routes": 1380.0,
+          "misses": 786.6328125
+        },
+        "refill-pipeline-screen-0-a64-pipe1": {
+          "all_ops_us": 14276.3515625,
+          "moe_us": 14134.4609375,
+          "moe_ops": 138.0,
+          "logical_bytes": 818452800.0,
+          "routes": 1380.0,
+          "misses": 787.44140625
+        },
+        "refill-pipeline-screen-1-a8-pipe0": {
+          "all_ops_us": 17195.3984375,
+          "moe_us": 17041.44140625,
+          "moe_ops": 138.0,
+          "logical_bytes": 1030715200.0,
+          "routes": 1380.0,
+          "misses": 991.79296875
+        },
+        "refill-pipeline-screen-1-a8-pipe1": {
+          "all_ops_us": 17165.5546875,
+          "moe_us": 17014.4609375,
+          "moe_ops": 138.0,
+          "logical_bytes": 1027002800.0,
+          "routes": 1380.0,
+          "misses": 988.1484375
+        }
+      }
+    }
+  },
+  "residency-fullctx-39": {
+    "runs": [
+      {
+        "label": "residency-fullctx-39-0-n1-t8",
+        "threads": 8,
+        "variant": "n1",
+        "compact": false,
+        "batch_d2h": false,
+        "serial": false,
+        "output": "G:\\qwenllamaMTP\\perf-20260911\\bench\\decode-optimization-20261108\\residency-fullctx-39\\result-0-n1-t8.json",
+        "measured_tokens": 256,
+        "measured_us": 10668240.0,
+        "tps": 23.996460522072994,
+        "max_logit_delta": 3.3763970136642456,
+        "relative_l2": 0.06992875952581772,
+        "different_logits": 79462350,
+        "argmax_different": 14,
+        "nonfinite": 0
+      }
+    ],
+    "by_threads": {
+      "8": {
+        "count": 1,
+        "mean_tps": 23.996460522072994,
+        "min_tps": 23.996460522072994,
+        "max_tps": 23.996460522072994,
+        "stdev_tps": null
+      }
+    },
+    "profile": {
+      "per_token": {
+        "residency-fullctx-39-0-n1-t8/CPU": {
+          "splits": 93.0,
+          "backend_calls": 93.0,
+          "source_wait_us": 18042.5859375,
+          "destination_wait_us": 1.94921875,
+          "copy_us": 993.16796875,
+          "async_try_us": 1.7109375,
+          "prewait_us": 1.90234375,
+          "fences_us": 16.18359375,
+          "inputs_total_us": 19073.1015625,
+          "compute_or_submit_us": 13268.5625,
+          "event_record_us": 3.34375
+        },
+        "residency-fullctx-39-0-n1-t8/CUDA0": {
+          "splits": 93.0,
+          "backend_calls": 93.0,
+          "source_wait_us": 1.15625,
+          "destination_wait_us": 11.83984375,
+          "copy_us": 1097.7734375,
+          "async_try_us": 1306.26171875,
+          "prewait_us": 629.21484375,
+          "fences_us": 19.80078125,
+          "inputs_total_us": 3088.14453125,
+          "compute_or_submit_us": 763.0234375,
+          "event_record_us": 2.33203125
+        },
+        "residency-fullctx-39-0-n1-t8/CUDA1": {
+          "splits": 22.0,
+          "backend_calls": 22.0,
+          "source_wait_us": 0.171875,
+          "destination_wait_us": 41.109375,
+          "copy_us": 226.40234375,
+          "async_try_us": 487.16796875,
+          "prewait_us": 499.3046875,
+          "fences_us": 4.5234375,
+          "inputs_total_us": 1266.78515625,
+          "compute_or_submit_us": 273.015625,
+          "event_record_us": 0.5390625
+        }
+      },
+      "outside_splits_us_per_token": {
+        "residency-fullctx-39-0-n1-t8": 3893.45703125
+      },
+      "cpu_per_token": {
+        "residency-fullctx-39-0-n1-t8": {
+          "all_ops_us": 12375.390625,
+          "moe_us": 12229.640625,
+          "moe_ops": 138.0,
+          "logical_bytes": 688530000.0,
+          "routes": 1380.0,
+          "misses": 662.16796875
+        }
+      }
+    }
+  },
+  "stock-thread-repeat": {
+    "runs": [
+      {
+        "label": "stock-thread-repeat-0-t24",
+        "threads": 24,
+        "output": "G:\\qwenllamaMTP\\perf-20260911\\bench\\decode-optimization-20261108\\stock-thread-repeat\\result-0-t24.json",
+        "measured_tokens": 256,
+        "measured_us": 11941898.0,
+        "tps": 21.437128335880946,
+        "max_logit_delta": 0.0,
+        "relative_l2": 0.0,
+        "different_logits": 0,
+        "argmax_different": 0,
+        "nonfinite": 0
+      },
+      {
+        "label": "stock-thread-repeat-1-t8",
+        "threads": 8,
+        "output": "G:\\qwenllamaMTP\\perf-20260911\\bench\\decode-optimization-20261108\\stock-thread-repeat\\result-1-t8.json",
+        "measured_tokens": 256,
+        "measured_us": 10953878.0,
+        "tps": 23.370718571085053,
+        "max_logit_delta": 6.295990228652954,
+        "relative_l2": 0.0764640927390519,
+        "different_logits": 79462353,
+        "argmax_different": 15,
+        "nonfinite": 0
+      },
+      {
+        "label": "stock-thread-repeat-2-t16",
+        "threads": 16,
+        "output": "G:\\qwenllamaMTP\\perf-20260911\\bench\\decode-optimization-20261108\\stock-thread-repeat\\result-2-t16.json",
+        "measured_tokens": 256,
+        "measured_us": 12173309.0,
+        "tps": 21.029614872997968,
+        "max_logit_delta": 4.3072620034217834,
+        "relative_l2": 0.07038801393248052,
+        "different_logits": 79462363,
+        "argmax_different": 16,
+        "nonfinite": 0
+      },
+      {
+        "label": "stock-thread-repeat-3-t8",
+        "threads": 8,
+        "output": "G:\\qwenllamaMTP\\perf-20260911\\bench\\decode-optimization-20261108\\stock-thread-repeat\\result-3-t8.json",
+        "measured_tokens": 256,
+        "measured_us": 10779278.0,
+        "tps": 23.749271518927333,
+        "max_logit_delta": 4.455045223236084,
+        "relative_l2": 0.07100274151580077,
+        "different_logits": 79462352,
+        "argmax_different": 10,
+        "nonfinite": 0
+      },
+      {
+        "label": "stock-thread-repeat-4-t24",
+        "threads": 24,
+        "output": "G:\\qwenllamaMTP\\perf-20260911\\bench\\decode-optimization-20261108\\stock-thread-repeat\\result-4-t24.json",
+        "measured_tokens": 256,
+        "measured_us": 12036792.0,
+        "tps": 21.268125261282243,
+        "max_logit_delta": 3.810368299484253,
+        "relative_l2": 0.0650774046163638,
+        "different_logits": 79462355,
+        "argmax_different": 11,
+        "nonfinite": 0
+      },
+      {
+        "label": "stock-thread-repeat-5-t16",
+        "threads": 16,
+        "output": "G:\\qwenllamaMTP\\perf-20260911\\bench\\decode-optimization-20261108\\stock-thread-repeat\\result-5-t16.json",
+        "measured_tokens": 256,
+        "measured_us": 12200329.0,
+        "tps": 20.98304070324661,
+        "max_logit_delta": 5.438870191574097,
+        "relative_l2": 0.069577919775747,
+        "different_logits": 79462351,
+        "argmax_different": 10,
+        "nonfinite": 0
+      },
+      {
+        "label": "stock-thread-repeat-6-t24",
+        "threads": 24,
+        "output": "G:\\qwenllamaMTP\\perf-20260911\\bench\\decode-optimization-20261108\\stock-thread-repeat\\result-6-t24.json",
+        "measured_tokens": 256,
+        "measured_us": 12066091.0,
+        "tps": 21.21648179182471,
+        "max_logit_delta": 3.89115047454834,
+        "relative_l2": 0.06878640105908607,
+        "different_logits": 79462352,
+        "argmax_different": 18,
+        "nonfinite": 0
+      },
+      {
+        "label": "stock-thread-repeat-7-t8",
+        "threads": 8,
+        "output": "G:\\qwenllamaMTP\\perf-20260911\\bench\\decode-optimization-20261108\\stock-thread-repeat\\result-7-t8.json",
+        "measured_tokens": 256,
+        "measured_us": 10835450.0,
+        "tps": 23.62615304394372,
+        "max_logit_delta": 3.7543742656707764,
+        "relative_l2": 0.06832185548453258,
+        "different_logits": 79462350,
+        "argmax_different": 9,
+        "nonfinite": 0
+      },
+      {
+        "label": "stock-thread-repeat-8-t16",
+        "threads": 16,
+        "output": "G:\\qwenllamaMTP\\perf-20260911\\bench\\decode-optimization-20261108\\stock-thread-repeat\\result-8-t16.json",
+        "measured_tokens": 256,
+        "measured_us": 12162696.0,
+        "tps": 21.047965023544123,
+        "max_logit_delta": 6.03828239440918,
+        "relative_l2": 0.07721598291090477,
+        "different_logits": 79462343,
+        "argmax_different": 9,
+        "nonfinite": 0
+      }
+    ],
+    "by_threads": {
+      "8": {
+        "count": 3,
+        "mean_tps": 23.5820477113187,
+        "min_tps": 23.370718571085053,
+        "max_tps": 23.749271518927333,
+        "stdev_tps": 0.19309206056824976
+      },
+      "16": {
+        "count": 3,
+        "mean_tps": 21.020206866596233,
+        "min_tps": 20.98304070324661,
+        "max_tps": 21.047965023544123,
+        "stdev_tps": 0.03346901223318172
+      },
+      "24": {
+        "count": 3,
+        "mean_tps": 21.307245129662633,
+        "min_tps": 21.21648179182471,
+        "max_tps": 21.437128335880946,
+        "stdev_tps": 0.11540796085004038
+      }
+    }
+  }
+}
