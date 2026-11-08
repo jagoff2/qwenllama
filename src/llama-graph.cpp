@@ -5,6 +5,7 @@
 #include "llama-batch.h"
 #include "llama-cparams.h"
 #include "llama-moe-stream.h"
+#include "llama-moe-cache.h"
 #include "llama-sampler.h"
 
 #include "llama-kv-cache.h"
@@ -22,6 +23,7 @@
 #include <cstring>
 #include <numeric>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <unordered_set>
 
@@ -1339,6 +1341,7 @@ void llm_graph_result::reset() {
     t_sampled_probs.clear();
     t_sampled_logits.clear();
     t_candidates.clear();
+    t_moe_routes.clear();
 
     params = {};
 
@@ -1495,6 +1498,8 @@ llm_graph_context::llm_graph_context(const llm_graph_params & params) :
     mctx             (params.mctx),
     cross            (params.cross),
     moe_stream       (params.moe_stream),
+    moe_cache        (params.moe_cache),
+    moe_cache_observe(params.moe_cache_observe),
     samplers         (params.samplers),
     cb_func          (params.cb),
     res              (params.res),
@@ -1952,6 +1957,31 @@ ggml_tensor * llm_graph_context::build_ffn(
     return cur;
 }
 
+class llm_graph_input_moe_cache final : public llm_graph_input_i {
+public:
+    llama_moe_cache * cache;
+    int layer;
+    ggml_tensor * host_map;
+    ggml_tensor * device_map;
+    ggml_backend_t device_backend;
+
+    llm_graph_input_moe_cache(llama_moe_cache * cache, int layer, ggml_tensor * host_map,
+                            ggml_tensor * device_map, ggml_backend_t device_backend) :
+        cache(cache), layer(layer), host_map(host_map), device_map(device_map), device_backend(device_backend) {}
+
+    void set_input(const llama_ubatch *) override {
+        llama_moe_cache_layer_bind binding;
+        GGML_ASSERT(llama_moe_cache_bind(cache, layer, binding));
+        const size_t bytes = binding.n_expert * sizeof(int32_t);
+        ggml_backend_tensor_set(host_map, binding.host_slots, 0, bytes);
+        ggml_backend_tensor_set_async(device_backend, device_map, binding.host_slots, 0, bytes);
+    }
+
+    bool can_reuse(const llm_graph_params & params) override {
+        return params.moe_cache == cache;
+    }
+};
+
 ggml_tensor * llm_graph_context::build_moe_ffn(
          ggml_tensor * cur,
          ggml_tensor * gate_inp,
@@ -2030,6 +2060,36 @@ ggml_tensor * llm_graph_context::build_moe_ffn(
     // mirrors the byte layout of the original tensors, so the graph shape is unchanged
     llama_moe_stream_layer_bind ms_bind;
     bool ms_on = false;
+    llama_moe_cache_layer_bind mc_bind;
+    const bool mc_on = moe_cache && il >= 0 && !gate_up_exps && !gate_up_exps_b &&
+            !up_exps_s && !gate_exps_s && !down_exps_s && !up_exps_b && !gate_exps_b && !down_exps_b &&
+            type_op == LLM_FFN_SILU && !weight_before_ffn && loras && loras->empty() &&
+            llama_moe_cache_bind(moe_cache, il, mc_bind);
+    auto cache_cpu = [&](ggml_tensor * tensor) {
+        if (mc_on) {
+            const std::string original_name = tensor->name;
+            ggml_format_name(tensor, "fn_cache_cpu_%s", original_name.c_str());
+            ggml_backend_sched_set_tensor_backend(sched, tensor, backend_cpu);
+        }
+    };
+    ggml_tensor * mc_host_map = nullptr;
+    ggml_backend_t mc_gpu = nullptr;
+    if (mc_on) {
+        const auto dev = ggml_backend_buft_get_device(ggml_backend_buffer_get_type(mc_bind.bank[0]->buffer));
+        for (int b = 0; b < ggml_backend_sched_get_n_backends(sched); ++b) {
+            auto * backend = ggml_backend_sched_get_backend(sched, b);
+            if (ggml_backend_get_device(backend) == dev) {
+                mc_gpu = backend;
+                break;
+            }
+        }
+        GGML_ASSERT(mc_gpu);
+        mc_host_map = ggml_new_tensor_2d(ctx0, GGML_TYPE_I32, 1, mc_bind.n_expert);
+        ggml_set_input(mc_host_map);
+        ggml_set_input(mc_bind.slot_map);
+        ggml_backend_sched_set_tensor_backend(sched, mc_host_map, backend_cpu);
+        res->add_input(std::make_unique<llm_graph_input_moe_cache>(moe_cache, il, mc_host_map, mc_bind.slot_map, mc_gpu));
+    }
 
     if (il >= 0 && !gate_up_exps && !gate_up_exps_b && !up_exps_s && !gate_exps_s && !down_exps_s &&
             !up_exps_b && !gate_exps_b && !down_exps_b && type_op == LLM_FFN_SILU && !weight_before_ffn &&
@@ -2186,7 +2246,35 @@ ggml_tensor * llm_graph_context::build_moe_ffn(
     //call early so that topk-moe can be used
     ggml_build_forward_expand(gf, weights);
 
+    // Export routing after the complete router chain to preserve topk-MoE fusion.
+    if (moe_cache_observe && il >= 0 && (ms_on || llama_moe_stream_host_source(up_exps))) {
+        const int64_t rows = std::min<int64_t>(n_tokens, 256);
+        auto * tail = ggml_view_2d(ctx0, selected_experts, n_expert_used, rows,
+                                  selected_experts->nb[1], (n_tokens - rows) * selected_experts->nb[1]);
+        tail = ggml_cont(ctx0, tail);
+        ggml_set_output(tail);
+        ggml_format_name(tail, "fn_cache_routes_%d", il);
+        ggml_build_forward_expand(gf, tail);
+        res->t_moe_routes.emplace_back(il, tail);
+    }
+
     cur = ggml_reshape_3d(ctx0, cur, n_embd, 1, n_tokens);
+    ggml_tensor * mc_inp = cur;
+    ggml_tensor * mc_cpu_ids = selected_experts;
+    if (mc_on) {
+        // Finish the D2H copies before launching the independent cache branch.
+        // CONT owns distinct CPU storage (it is not an in-place eligible op).
+        // Its real edges to all three masked MMIDs keep both copies live until
+        // the CPU readers finish, including across the intervening GPU split.
+        cur = ggml_cont(ctx0, cur);
+        mc_cpu_ids = ggml_cont(ctx0, selected_experts);
+        ggml_format_name(cur, "fn_cache_prep_input_%d", il);
+        ggml_format_name(mc_cpu_ids, "fn_cache_prep_ids_%d", il);
+        ggml_backend_sched_set_tensor_backend(sched, cur, backend_cpu);
+        ggml_backend_sched_set_tensor_backend(sched, mc_cpu_ids, backend_cpu);
+        ggml_build_forward_expand(gf, cur);
+        ggml_build_forward_expand(gf, mc_cpu_ids);
+    }
 
     if (weight_before_ffn) {
         // repeat cur to [n_embd, n_expert_used, n_tokens]
@@ -2219,8 +2307,10 @@ ggml_tensor * llm_graph_context::build_moe_ffn(
         cb(up, "ffn_moe_up", il);
     } else {
         // separate gate and up path
-        up = build_lora_mm_id(up_exps, cur, selected_experts, up_exps_s); // [n_ff, n_expert_used, n_tokens]
+        up = mc_on ? ggml_mul_mat_id_cpu_masked(ctx0, up_exps, cur, mc_cpu_ids, mc_host_map) :
+                build_lora_mm_id(up_exps, cur, selected_experts, up_exps_s); // [n_ff, n_expert_used, n_tokens]
         cb(up, "ffn_moe_up", il);
+        cache_cpu(up);
 
         if (up_exps_s) {
             cb(up, "ffn_moe_up_scaled", il);
@@ -2232,8 +2322,10 @@ ggml_tensor * llm_graph_context::build_moe_ffn(
         }
 
         if (gate_exps) {
-            cur = build_lora_mm_id(gate_exps, cur, selected_experts, gate_exps_s); // [n_ff, n_expert_used, n_tokens]
+            cur = mc_on ? ggml_mul_mat_id_cpu_masked(ctx0, gate_exps, cur, mc_cpu_ids, mc_host_map) :
+                    build_lora_mm_id(gate_exps, cur, selected_experts, gate_exps_s); // [n_ff, n_expert_used, n_tokens]
             cb(cur, "ffn_moe_gate", il);
+            cache_cpu(cur);
         } else {
             cur = up;
         }
@@ -2262,13 +2354,17 @@ ggml_tensor * llm_graph_context::build_moe_ffn(
                         } else {
                             up = ggml_clamp(ctx0, up, -limit, limit);
                             cb(up, "ffn_moe_up_clamped", il);
+                            cache_cpu(up);
                             ggml_tensor * gate_act = ggml_silu(ctx0, cur);
                             cb(gate_act, "ffn_moe_silu", il);
+                            cache_cpu(gate_act);
                             gate_act = ggml_clamp(ctx0, gate_act, -INFINITY, limit);
                             cb(gate_act, "ffn_moe_silu_clamped", il);
+                            cache_cpu(gate_act);
                             cur = ggml_mul(ctx0, gate_act, up);
                         }
                         cb(cur, "ffn_moe_swiglu_limited", il);
+                        cache_cpu(cur);
                         break;
                     }
                 }
@@ -2277,6 +2373,7 @@ ggml_tensor * llm_graph_context::build_moe_ffn(
             if (has_gate) {
                 cur = ggml_swiglu_split(ctx0, cur, up);
                 cb(cur, "ffn_moe_swiglu", il);
+                cache_cpu(cur);
             } else {
                 cur = ggml_silu(ctx0, cur);
                 cb(cur, "ffn_moe_silu", il);
@@ -2333,8 +2430,67 @@ ggml_tensor * llm_graph_context::build_moe_ffn(
             GGML_ABORT("fatal error");
     }
 
-    experts = build_lora_mm_id(down_exps, cur, selected_experts, down_exps_s); // [n_embd, n_expert_used, n_tokens]
+    experts = mc_on ? ggml_mul_mat_id_cpu_masked(ctx0, down_exps, cur, mc_cpu_ids, mc_host_map) :
+            build_lora_mm_id(down_exps, cur, selected_experts, down_exps_s); // [n_embd, n_expert_used, n_tokens]
     cb(experts, "ffn_moe_down", il);
+    cache_cpu(experts);
+
+    if (mc_on) {
+        size_t extent = 0;
+        size_t scratch_offset = 0;
+        auto cache_tensor = [&](ggml_tensor * tensor, const char * name, int tile) {
+            ggml_format_name(tensor, "fn_cache_gpu_%s_%d_%d", name, il, tile);
+            ggml_backend_sched_set_tensor_backend(sched, tensor, mc_gpu);
+            if (tensor->view_src) {
+                return tensor;
+            }
+            const size_t bytes = GGML_PAD(ggml_nbytes(tensor), 512);
+            while (scratch_offset + bytes > llama_moe_cache_scratch_capacity(moe_cache, extent)) {
+                ++extent;
+                scratch_offset = 0;
+                if (!llama_moe_cache_scratch_capacity(moe_cache, extent)) {
+                    throw std::runtime_error("decode expert graph exceeds shared-pool scratch");
+                }
+            }
+            if (!llama_moe_cache_scratch_bind(moe_cache, tensor, extent, scratch_offset)) {
+                throw std::runtime_error("cannot bind shared-pool decode scratch");
+            }
+            scratch_offset += bytes;
+            return tensor;
+        };
+        ggml_tensor * gpu_down = nullptr;
+        for (int64_t first = 0; first < n_tokens; first += 8) {
+            const int rows = (int) std::min<int64_t>(8, n_tokens - first);
+            const int tile = (int) first / 8;
+            auto * inp = ggml_view_3d(ctx0, mc_inp, mc_inp->ne[0], 1, rows,
+                                      mc_inp->nb[1], mc_inp->nb[2], first * mc_inp->nb[2]);
+            auto * ids = ggml_view_2d(ctx0, selected_experts, n_expert_used, rows,
+                                      selected_experts->nb[1], first * selected_experts->nb[1]);
+            ids = cache_tensor(ggml_cont(ctx0, ids), "ids", tile);
+            ids = ggml_reshape_1d(ctx0, ids, n_expert_used * rows);
+            ids = cache_tensor(ggml_get_rows(ctx0, mc_bind.slot_map, ids), "map", tile);
+            ids = ggml_reshape_2d(ctx0, ids, n_expert_used, rows);
+            auto * u = cache_tensor(ggml_mul_mat_id(ctx0, mc_bind.bank[0], inp, ids), "up", tile);
+            auto * g = cache_tensor(ggml_mul_mat_id(ctx0, mc_bind.bank[1], inp, ids), "gate", tile);
+            const float limit = hparams.swiglu_clamp_exp[il];
+            ggml_tensor * act;
+            if (limit > 1e-6f) {
+                u = cache_tensor(ggml_clamp(ctx0, u, -limit, limit), "up_clamp", tile);
+                g = cache_tensor(ggml_silu(ctx0, g), "silu", tile);
+                g = cache_tensor(ggml_clamp(ctx0, g, -INFINITY, limit), "gate_clamp", tile);
+                act = cache_tensor(ggml_mul(ctx0, g, u), "act", tile);
+            } else {
+                act = cache_tensor(ggml_swiglu_split(ctx0, g, u), "act", tile);
+            }
+            auto * down = cache_tensor(ggml_mul_mat_id(ctx0, mc_bind.bank[2], act, ids), "down", tile);
+            gpu_down = gpu_down ? cache_tensor(ggml_concat(ctx0, gpu_down, down, 2), "concat", tile) : down;
+        }
+        // CPU FFN nodes exist but have not been visited: enqueue cache work
+        // first, then run the independent CPU subtree when expanding the join.
+        ggml_build_forward_expand(gf, gpu_down);
+        experts = ggml_add(ctx0, experts, gpu_down);
+        cb(experts, "ffn_moe_cache_merged", il);
+    }
 
     if (ms_on) {
         // the down projection is the last reader of the arena slot: release it and kick the fill of

@@ -633,6 +633,9 @@ ggml_backend_buffer_t ggml_backend_dev_buffer_from_host_ptr(ggml_backend_dev_t d
 
 bool ggml_backend_dev_supports_op(ggml_backend_dev_t device, const struct ggml_tensor * op) {
     GGML_ASSERT(device);
+    if (op->op == GGML_OP_MUL_MAT_ID_MASKED && strcmp(ggml_backend_reg_name(device->reg), "CPU") != 0) {
+        return false;
+    }
     return device->iface.supports_op(device, op);
 }
 
@@ -779,6 +782,7 @@ struct ggml_backend_sched_split {
     struct ggml_tensor ** inputs;
     int n_inputs;
     int inputs_capacity;
+    bool cache_cpu_overlap; // validated after allocation; only discrete CUDA -> CPU cache FFN
     // graph view of this split
     struct ggml_cgraph graph;
 };
@@ -830,6 +834,7 @@ struct ggml_backend_sched {
     size_t context_buffer_size;
 
     bool op_offload;
+    bool cache_cpu_overlap_reported;
 
     int debug;
 
@@ -1588,6 +1593,91 @@ void ggml_backend_sched_split_graph(ggml_backend_sched_t sched, struct ggml_cgra
     }
 }
 
+// This is deliberately narrower than general heterogeneous graph concurrency.
+// A name opts in; backend identities, operations, input copies, and actual buffer
+// ownership prove that the CPU writes cannot alias outstanding CUDA readers.
+static bool ggml_backend_sched_cache_cpu_overlap(ggml_backend_sched_t sched, int i) {
+    if (i < 1 || sched->n_copies != 1 || sched->callback_eval) {
+        return false;
+    }
+    const auto & gpu = sched->splits[i - 1];
+    const auto & cpu = sched->splits[i];
+    auto cpu_dev = ggml_backend_get_device(sched->backends[cpu.backend_id]);
+    auto gpu_dev = ggml_backend_get_device(sched->backends[gpu.backend_id]);
+    if (cpu.n_inputs != 0 || cpu.backend_id == gpu.backend_id ||
+        ggml_backend_dev_type(cpu_dev) != GGML_BACKEND_DEVICE_TYPE_CPU ||
+        ggml_backend_dev_type(gpu_dev) != GGML_BACKEND_DEVICE_TYPE_GPU ||
+        strcmp(ggml_backend_reg_name(ggml_backend_dev_backend_reg(cpu_dev)), "CPU") != 0 ||
+        strcmp(ggml_backend_reg_name(ggml_backend_dev_backend_reg(gpu_dev)), "CUDA") != 0 ||
+        sched->bufts[cpu.backend_id] == sched->bufts[gpu.backend_id]) {
+        return false;
+    }
+    auto buffer_is = [](const ggml_tensor * t, bool host) {
+        const auto * owner = t->view_src ? t->view_src : t;
+        return t->data && owner->buffer && ggml_backend_buffer_is_host(owner->buffer) == host;
+    };
+    auto noop = [](const ggml_tensor * t) {
+        return ggml_is_view_op(t->op) || t->op == GGML_OP_NONE || ggml_is_empty(t);
+    };
+    // Graph splitting rewrites inputs to device copies. Check the original copy
+    // sources too, so a future async H2D implementation cannot race CPU reuse.
+    for (int n = 0; n < gpu.n_inputs; ++n) {
+        if (!buffer_is(gpu.inputs[n], false)) {
+            return false;
+        }
+    }
+    int cpu_mmid = 0;
+    int gpu_mmid = 0;
+    for (int side = 0; side < 2; ++side) {
+        const auto & split = side == 0 ? cpu : gpu;
+        const bool host = side == 0;
+        for (int n = 0; n < split.graph.n_nodes; ++n) {
+            const auto * t = split.graph.nodes[n];
+            if (noop(t)) {
+                continue;
+            }
+            if (strncmp(t->name, host ? "fn_cache_cpu_" : "fn_cache_gpu_", 13) != 0 ||
+                !buffer_is(t, host)) {
+                return false;
+            }
+            for (const auto * src : t->src) {
+                if (src && !buffer_is(src, host)) {
+                    return false;
+                }
+            }
+            // Exclude copies, custom ops, fences, and operations with hidden
+            // cross-device effects. Views cannot compute or write anything.
+            switch (t->op) {
+                case GGML_OP_MUL_MAT_ID_MASKED:
+                    if (!host) { return false; }
+                    ++cpu_mmid;
+                    break;
+                case GGML_OP_MUL_MAT_ID:
+                    if (host) { return false; }
+                    ++gpu_mmid;
+                    break;
+                case GGML_OP_CONT:
+                case GGML_OP_GET_ROWS:
+                case GGML_OP_CONCAT:
+                    if (host) { return false; }
+                    break;
+                case GGML_OP_CLAMP:
+                case GGML_OP_MUL:
+                    break;
+                case GGML_OP_UNARY:
+                    if (ggml_get_unary_op(t) != GGML_UNARY_OP_SILU) { return false; }
+                    break;
+                case GGML_OP_GLU:
+                    if (ggml_get_glu_op(t) != GGML_GLU_OP_SWIGLU) { return false; }
+                    break;
+                default:
+                    return false;
+            }
+        }
+    }
+    return cpu_mmid == 3 && gpu_mmid >= 3 && gpu_mmid % 3 == 0;
+}
+
 static bool ggml_backend_sched_alloc_splits(ggml_backend_sched_t sched) {
     bool backend_ids_changed = false;
     for (int i = 0; i < sched->graph.n_nodes; i++) {
@@ -1637,6 +1727,13 @@ static bool ggml_backend_sched_alloc_splits(ggml_backend_sched_t sched) {
         }
     }
 
+    // Buffer addresses and ownership are available only after gallocr allocation.
+    for (int i = 0; i < sched->n_splits; ++i) {
+        sched->splits[i].cache_cpu_overlap = ggml_backend_sched_cache_cpu_overlap(sched, i);
+        if (sched->debug && sched->splits[i].cache_cpu_overlap) {
+            GGML_LOG_INFO("fn-cache CPU overlap enabled for split %d\n", i);
+        }
+    }
     return true;
 }
 
@@ -1658,7 +1755,12 @@ static enum ggml_status ggml_backend_sched_compute_splits(ggml_backend_sched_t s
         // ensure the previous split's async work has completed before we start
         // this split, the allocator may have reused buffer regions across splits
         if (split->n_inputs == 0 && prev_backend_id >= 0 && prev_backend_id != split_backend_id) {
-            if (sched->events[prev_backend_id][sched->cur_copy] != NULL) {
+            if (split->cache_cpu_overlap && !sched->callback_eval) {
+                if (!sched->cache_cpu_overlap_reported) {
+                    GGML_LOG_INFO("fn-cache: CPU/GPU overlap active\n");
+                    sched->cache_cpu_overlap_reported = true;
+                }
+            } else if (sched->events[prev_backend_id][sched->cur_copy] != NULL) {
                 ggml_backend_event_synchronize(sched->events[prev_backend_id][sched->cur_copy]);
             } else {
                 ggml_backend_synchronize(sched->backends[prev_backend_id]);
@@ -1867,6 +1969,7 @@ ggml_backend_sched_t ggml_backend_sched_new(
 
     sched->n_backends = n_backends;
     sched->n_copies = parallel ? GGML_SCHED_MAX_COPIES : 1;
+    sched->cache_cpu_overlap_reported = false;
 
     // initialize hash table
     // FIXME: needs to be size*2 to account for leafs (do it in graph_split instead)

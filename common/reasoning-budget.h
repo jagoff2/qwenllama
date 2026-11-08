@@ -12,7 +12,7 @@ enum common_reasoning_budget_state {
     REASONING_BUDGET_COUNTING,     // counting down tokens
     REASONING_BUDGET_FORCING,      // forcing budget message + end sequence
     REASONING_BUDGET_WAITING_UTF8, // budget exhausted, waiting for UTF-8 completion
-    REASONING_BUDGET_DONE,         // passthrough forever
+    REASONING_BUDGET_DONE,         // wait for output before allowing EOG
 };
 
 // Creates a reasoning budget sampler that limits token generation inside a
@@ -23,7 +23,7 @@ enum common_reasoning_budget_state {
 //   COUNTING:     counting down remaining tokens, watching for a natural end sequence
 //   WAITING_UTF8: budget exhausted, allowing tokens to complete a UTF-8 sequence
 //   FORCING:      forces forced_tokens token-by-token (all other logits -> -inf)
-//   DONE:         passthrough forever
+//   DONE:         suppress EOG until non-whitespace output starts
 //
 // Parameters:
 //   vocab          - vocabulary (used for UTF-8 boundary detection; can be nullptr)

@@ -19,6 +19,8 @@
 #include "ggml-alloc.h"
 #include "ggml-backend.h"
 #include "ggml-cpp.h"
+#include "ggml-moe-stream.h"
+#include "gguf.h"
 
 #include <algorithm>
 #include <atomic>
@@ -1219,6 +1221,12 @@ struct test_case {
         }
     }
 
+    virtual bool validate_tensor(const ggml_tensor * tensor, const std::vector<float> & values) {
+        GGML_UNUSED(tensor);
+        GGML_UNUSED(values);
+        return true;
+    }
+
     // re-draw data-dependent inputs between timed perf iterations
     virtual void reinit_perf_iter(ggml_context * ctx) {
         GGML_UNUSED(ctx);
@@ -1472,6 +1480,12 @@ struct test_case {
 
             std::vector<float> f1 = tensor_to_float(t1);
             std::vector<float> f2 = tensor_to_float(t2);
+
+            if (!ud->tc->validate_tensor(t1, f1)) {
+                printf("[%s] independent output validation failed ", t1->name);
+                ud->ok = false;
+                return true;
+            }
 
             for (size_t i = 0; i < f1.size(); i++) {
                 // check for nans
@@ -5102,6 +5116,125 @@ struct test_mul_mat_id : public test_case {
 
     void reinit_perf_iter(ggml_context * ctx) override {
         init_mul_mat_id_ids(ctx, n_mats);
+    }
+};
+
+struct test_mul_mat_id_masked : public test_mul_mat_id {
+    const int mask_mode;
+    std::vector<float> unmasked;
+
+    test_mul_mat_id_masked(ggml_type type, int64_t rows, bool broadcast, int mask_mode)
+        : test_mul_mat_id(type, GGML_TYPE_F32, 16, 4, broadcast, 64, rows, 512), mask_mode(mask_mode) {}
+
+    void reinit_perf_iter(ggml_context *) override {}
+
+    std::string vars() override {
+        return test_mul_mat_id::vars() + "," + VAR_TO_STR(mask_mode);
+    }
+
+    ggml_tensor * build_graph(ggml_context * ctx) override {
+        ggml_tensor * baseline = test_mul_mat_id::build_graph(ctx);
+        ggml_set_name(baseline, "masked_baseline");
+        ggml_build_forward_expand(gf, baseline);
+        ggml_tensor * resident = ggml_new_tensor_2d(ctx, GGML_TYPE_I32, 1, n_mats);
+        ggml_set_name(resident, "resident");
+        ggml_tensor * out = ggml_mul_mat_id_cpu_masked(ctx, baseline->src[0], baseline->src[1], baseline->src[2], resident);
+        ggml_set_name(out, "masked_out");
+        return out;
+    }
+
+    void initialize_tensors(ggml_context * ctx) override {
+        test_mul_mat_id::initialize_tensors(ctx);
+        std::vector<int32_t> resident(n_mats);
+        for (int i = 0; i < n_mats; ++i) {
+            resident[i] = mask_mode == 1 || (mask_mode == 2 && i % 2) ? i + 1 : 0;
+        }
+        ggml_backend_tensor_set(ggml_get_tensor(ctx, "resident"), resident.data(), 0, resident.size()*sizeof(int32_t));
+        ggml_tensor * ids = ggml_get_tensor(ctx, "ids");
+        std::vector<int32_t> routes(n_mats*n);
+        for (int64_t t = 0; t < n; ++t) {
+            for (int j = 0; j < n_mats; ++j) {
+                routes[t*n_mats + j] = (3*j + t) % n_mats;
+            }
+        }
+        ggml_backend_tensor_set(ids, routes.data(), 0, routes.size()*sizeof(int32_t));
+        unmasked.clear();
+    }
+
+    bool validate_tensor(const ggml_tensor * tensor, const std::vector<float> & values) override {
+        if (strcmp(tensor->name, "masked_baseline") == 0) {
+            unmasked = values;
+        } else if (strcmp(tensor->name, "masked_out") == 0) {
+            if (unmasked.size() != values.size()) {
+                return false;
+            }
+            for (int64_t t = 0; t < n; ++t) {
+                for (int j = 0; j < n_used; ++j) {
+                    const int expert = (3*j + t) % n_mats;
+                    const bool hit = mask_mode == 1 || (mask_mode == 2 && expert % 2);
+                    for (int64_t r = 0; r < m; ++r) {
+                        const size_t i = (t*n_used + j)*m + r;
+                        const float expected = hit ? 0.0f : unmasked[i];
+                        if (values[i] != expected || (hit && std::signbit(values[i]))) {
+                            return false;
+                        }
+                    }
+                }
+            }
+        }
+        return true;
+    }
+};
+
+struct test_mul_mat_id_cache_dummy : public test_mul_mat_id {
+    test_mul_mat_id_cache_dummy(ggml_type type, int64_t rows, bool broadcast)
+        : test_mul_mat_id(type, GGML_TYPE_F32, 12, 10, broadcast,
+                type == GGML_TYPE_Q4_K || type == GGML_TYPE_Q5_K ? 640 : 2560, rows,
+                type == GGML_TYPE_Q4_K || type == GGML_TYPE_Q5_K ? 2560 : 640) {}
+
+    void reinit_perf_iter(ggml_context *) override {}
+
+    std::string op_desc(ggml_tensor *) override {
+        return "MUL_MAT_ID_CACHE_DUMMY";
+    }
+
+    ggml_tensor * build_graph(ggml_context * ctx) override {
+        ggml_tensor * out = test_mul_mat_id::build_graph(ctx);
+        ggml_set_name(out, "cache_dummy_out");
+        return out;
+    }
+
+    void initialize_tensors(ggml_context * ctx) override {
+        test_mul_mat_id::initialize_tensors(ctx);
+        ggml_tensor * as = ggml_get_tensor(ctx, "as");
+        std::vector<uint8_t> zero(as->nb[2], 0);
+        ggml_backend_tensor_set(as, zero.data(), (n_mats - 1)*as->nb[2], zero.size());
+        ggml_tensor * ids = ggml_get_tensor(ctx, "ids");
+        std::vector<int32_t> routes(n_mats*n);
+        const int first_dummy = n == 2 ? 0 : 6;
+        for (int64_t t = 0; t < n; ++t) {
+            for (int j = 0; j < n_mats; ++j) {
+                routes[t*n_mats + j] = j < first_dummy ? (j + t) % (n_mats - 1) : n_mats - 1;
+            }
+        }
+        ggml_backend_tensor_set(ids, routes.data(), 0, routes.size()*sizeof(int32_t));
+    }
+
+    bool validate_tensor(const ggml_tensor * tensor, const std::vector<float> & values) override {
+        if (strcmp(tensor->name, "cache_dummy_out") != 0) {
+            return true;
+        }
+        const int first_dummy = n == 2 ? 0 : 6;
+        for (int64_t t = 0; t < n; ++t) {
+            for (int j = first_dummy; j < n_used; ++j) {
+                for (int64_t r = 0; r < m; ++r) {
+                    if (values[(t*n_used + j)*m + r] != 0.0f) {
+                        return false;
+                    }
+                }
+            }
+        }
+        return true;
     }
 };
 
@@ -9911,6 +10044,21 @@ static std::vector<std::unique_ptr<test_case>> make_test_cases_eval() {
     test_cases.emplace_back(new test_mul_mat(GGML_TYPE_BF16, GGML_TYPE_F32, 16, 16, 256, {2, 3}, {1, 1}, {0, 1, 3, 2}));
     test_cases.emplace_back(new test_mul_mat(GGML_TYPE_BF16, GGML_TYPE_F32, 16, 16, 256, {2, 3}, {1, 1}, {0, 3, 2, 1}));
 
+    for (ggml_type type : {GGML_TYPE_Q4_K, GGML_TYPE_Q5_K, GGML_TYPE_Q5_1, GGML_TYPE_Q8_0}) {
+        for (int rows : {1, 2, 4, 8, 9, 49}) {
+            for (int mask_mode : {0, 1, 2}) {
+                for (bool broadcast : {false, true}) {
+                    test_cases.emplace_back(new test_mul_mat_id_masked(type, rows, broadcast, mask_mode));
+                }
+            }
+        }
+        for (int rows : {1, 2, 8}) {
+            for (bool broadcast : {false, true}) {
+                test_cases.emplace_back(new test_mul_mat_id_cache_dummy(type, rows, broadcast));
+            }
+        }
+    }
+
     // token-tile boundary coverage. With n_used == n_mats every token routes to every expert, so
     // each expert receives exactly n rows, with no dependence on the random draw. mul_mm_id is used
     // from 32 tokens up: n = 32, 33, 47, 48, 49 reach it, leaving a last tile of 32, 1, 15, 16 and
@@ -10887,7 +11035,7 @@ static std::vector<std::unique_ptr<test_case>> make_test_cases_eval() {
     test_cases.emplace_back(new test_gated_delta_net(GGML_TYPE_F32, 8, 128,  4, 1, 1, false, false, /*K=*/4));
     test_cases.emplace_back(new test_gated_delta_net(GGML_TYPE_F32, 4, 64,   4, 2, 1, false, true,  /*K=*/4));
     test_cases.emplace_back(new test_gated_delta_net(GGML_TYPE_F32, 8, 32,   4, 2, 2, false, true,  /*K=*/4));
-    // overflow: n_tokens > K — only the last K snapshots kept.
+    // overflow: n_tokens > K â€” only the last K snapshots kept.
     test_cases.emplace_back(new test_gated_delta_net(GGML_TYPE_F32, 4, 32,   8, 1, 1, false, false, /*K=*/3));
     test_cases.emplace_back(new test_gated_delta_net(GGML_TYPE_F32, 4, 64,  16, 2, 1, false, false, /*K=*/4));
 
@@ -11535,8 +11683,536 @@ static bool run_fa_vec_slice(ggml_backend_t backend, ggml_backend_t backend_cpu,
     return n_fail == 0;
 }
 
+// Exercise the actual split FFN, including its registered MMVQ scratch and tiled ID mapping.
+// The reference computes every expert on the CPU from the same authoritative quantized bytes.
+// schedule: 0 = existing serial control, 1 = eligible overlap, 2 = host-read rejection.
+static bool test_moe_cache_hybrid(ggml_backend_t backend, ggml_backend_dev_t dev, int schedule = 0) {
+    auto reg = ggml_backend_dev_backend_reg(dev);
+    if (strcmp(ggml_backend_reg_name(reg), "CUDA") != 0) {
+        printf("  MOE_CACHE_HYBRID: skipped non-CUDA backend\n");
+        return true;
+    }
+    auto setup = (ggml_cuda_moe_stream_setup_t) ggml_backend_reg_get_proc_address(reg, GGML_MOE_STREAM_PROC_SETUP);
+    auto teardown = (ggml_cuda_moe_stream_teardown_t) ggml_backend_reg_get_proc_address(reg, GGML_MOE_STREAM_PROC_TEARDOWN);
+    auto phase = (ggml_cuda_moe_stream_mode_t) ggml_backend_reg_get_proc_address(reg, GGML_MOE_STREAM_PROC_MODE);
+    auto scratch = (ggml_cuda_moe_cache_scratch_t) ggml_backend_reg_get_proc_address(reg, GGML_MOE_STREAM_PROC_SCRATCH);
+    if (!setup || !teardown || !phase || !scratch) {
+        return false;
+    }
+    int device = -1;
+    for (size_t i = 0; i < ggml_backend_reg_dev_count(reg); ++i) {
+        if (ggml_backend_reg_dev_get(reg, i) == dev) {
+            device = (int) i;
+        }
+    }
+    ggml_backend_ptr cpu(ggml_backend_init_by_type(GGML_BACKEND_DEVICE_TYPE_CPU, nullptr));
+    if (!cpu) {
+        return false;
+    }
+    auto cpu_reg = ggml_backend_dev_backend_reg(ggml_backend_get_device(cpu.get()));
+    auto set_threads = (ggml_backend_set_n_threads_t) ggml_backend_reg_get_proc_address(cpu_reg, "ggml_backend_set_n_threads");
+    if (set_threads) {
+        set_threads(cpu.get(), std::min<unsigned>(8, std::max<unsigned>(1, N_THREADS)));
+    }
+    const size_t capacity = size_t(128) << 20;
+    const size_t quant_bytes = size_t(1) << 20;
+    auto buft = ggml_backend_dev_buffer_type(dev);
+    ggml_backend_buffer_ptr arena(ggml_backend_buft_alloc_buffer(buft, capacity));
+    if (!arena) {
+        return false;
+    }
+    char * base = (char *) ggml_backend_buffer_get_base(arena.get());
+    uint8_t unused_host = 0;
+    ggml_cuda_moe_stream_layer layer{};
+    layer.host[0] = &unused_host;
+    layer.nbytes[0] = 1;
+    ggml_cuda_moe_stream_slot slot{};
+    slot.dev = base;
+    slot.cap = capacity;
+    slot.nbytes[0] = 1;
+    ggml_cuda_moe_stream_params params{};
+    params.device = device;
+    params.owner = 0x485942524944ULL;
+    params.n_slots = 1;
+    if (setup(&params, &layer, 1, &slot, 1) != 0) {
+        return false;
+    }
+    // Keep the owner alive until all scheduled readers have finished, including failure returns.
+    struct pool_guard {
+        ggml_backend_t backend;
+        ggml_cuda_moe_stream_teardown_t teardown;
+        int device;
+        uint64_t owner;
+        ~pool_guard() { ggml_backend_synchronize(backend); teardown(device, owner); }
+    } guard { backend, teardown, device, params.owner };
+    if (phase(device, params.owner, 1) != 0 || scratch(device, params.owner, base, quant_bytes) != 0) {
+        return false;
+    }
+    constexpr int experts = 16;
+    constexpr int used = 10;
+    constexpr int embd = 2560;
+    constexpr int hidden = 640;
+    // Stable across devices and scheduling controls; never select a seed to
+    // satisfy the numerical gate. Keep the seed in any failure artifact.
+    constexpr uint32_t test_seed = 0x5A17;
+    std::mt19937 rng(test_seed);
+    auto init_stable = [&](ggml_tensor * tensor, float scale) {
+        std::vector<float> values(ggml_nelements(tensor));
+        for (auto & value : values) {
+            value = scale * (float(rng() >> 8) * (2.0f / 16777216.0f) - 1.0f);
+        }
+        if (tensor->type == GGML_TYPE_F32) {
+            ggml_backend_tensor_set(tensor, values.data(), 0, ggml_nbytes(tensor));
+        } else {
+            std::vector<uint8_t> bytes(ggml_nbytes(tensor));
+            ggml_quantize_chunk(tensor->type, values.data(), bytes.data(), 0,
+                                ggml_nelements(tensor) / tensor->ne[0], tensor->ne[0], nullptr);
+            ggml_backend_tensor_set(tensor, bytes.data(), 0, bytes.size());
+        }
+    };
+    const ggml_type layouts[][3] = {
+        {GGML_TYPE_Q4_K, GGML_TYPE_Q4_K, GGML_TYPE_Q5_1},
+        {GGML_TYPE_Q4_K, GGML_TYPE_Q4_K, GGML_TYPE_Q8_0},
+        {GGML_TYPE_Q5_K, GGML_TYPE_Q5_K, GGML_TYPE_Q8_0},
+    };
+    int cases = 0;
+    int failures = 0;
+    int serial_checks = 0;
+    for (const auto & types : layouts) {
+        ggml_context_ptr weights_ctx(ggml_init({1 << 20, nullptr, true}));
+        ggml_context_ptr banks_ctx(ggml_init({1 << 20, nullptr, true}));
+        ggml_tensor * weights[3];
+        ggml_tensor * banks[3];
+        size_t permanent = quant_bytes;
+        for (int f = 0; f < 3; ++f) {
+            weights[f] = ggml_new_tensor_3d(weights_ctx.get(), types[f], f == 2 ? hidden : embd,
+                                           f == 2 ? embd : hidden, experts);
+            banks[f] = ggml_new_tensor_3d(banks_ctx.get(), types[f], weights[f]->ne[0], weights[f]->ne[1], experts + 1);
+            if (ggml_backend_tensor_alloc(arena.get(), banks[f], base + permanent) != GGML_STATUS_SUCCESS) {
+                return false;
+            }
+            permanent += GGML_PAD(ggml_backend_buft_get_alloc_size(buft, banks[f]), 512);
+        }
+        auto * device_map = ggml_new_tensor_2d(banks_ctx.get(), GGML_TYPE_I32, 1, experts);
+        if (ggml_backend_tensor_alloc(arena.get(), device_map, base + permanent) != GGML_STATUS_SUCCESS) {
+            return false;
+        }
+        permanent += 512;
+        ggml_backend_buffer_ptr weights_buffer(ggml_backend_alloc_ctx_tensors(weights_ctx.get(), cpu.get()));
+        if (!weights_buffer) {
+            return false;
+        }
+        for (int f = 0; f < 3; ++f) {
+            init_stable(weights[f], 0.2f);
+            std::vector<uint8_t> zero(banks[f]->nb[2], 0);
+            ggml_backend_tensor_set(banks[f], zero.data(), 0, zero.size());
+            for (int e = 0; e < experts; ++e) {
+                const int bank_slot = 1 + (5*e) % experts;
+                ggml_backend_tensor_set(banks[f], (char *) weights[f]->data + e*weights[f]->nb[2],
+                                        bank_slot*banks[f]->nb[2], weights[f]->nb[2]);
+            }
+        }
+        for (int rows : {1, 8, 9, 49}) {
+            for (int mode : {0, 1, 2}) {
+                ggml_context_ptr reference_ctx(ggml_init({4 << 20, nullptr, true}));
+                ggml_context_ptr input_ctx(ggml_init({1 << 20, nullptr, true}));
+                ggml_context_ptr graph_ctx(ggml_init({4 << 20, nullptr, true}));
+                auto * rc = reference_ctx.get();
+                auto * gc = graph_ctx.get();
+                auto * input_ref = ggml_new_tensor_3d(rc, GGML_TYPE_F32, embd, 1, rows);
+                auto * ids_ref_full = ggml_new_tensor_2d(rc, GGML_TYPE_I32, experts, rows);
+                auto * ids_ref = ggml_view_2d(rc, ids_ref_full, used, rows, ids_ref_full->nb[1], 0);
+                auto * routes_ref = ggml_new_tensor_3d(rc, GGML_TYPE_F32, 1, used, rows);
+                auto * host_map = ggml_new_tensor_2d(rc, GGML_TYPE_I32, 1, experts);
+                const float limit = rows == 8 ? 0.0f : 7.0f;
+                auto activation = [&](ggml_context * ctx, ggml_tensor * u, ggml_tensor * g) {
+                    if (limit > 0) {
+                        u = ggml_clamp(ctx, u, -limit, limit);
+                        g = ggml_clamp(ctx, ggml_silu(ctx, g), -INFINITY, limit);
+                        return ggml_mul(ctx, g, u);
+                    }
+                    return ggml_swiglu_split(ctx, g, u);
+                };
+                auto reduce = [&](ggml_context * ctx, ggml_tensor * down, ggml_tensor * routes) {
+                    auto * weighted = ggml_mul(ctx, down, routes);
+                    auto * sum = ggml_view_2d(ctx, weighted, embd, rows, weighted->nb[2], 0);
+                    for (int k = 1; k < used; ++k) {
+                        sum = ggml_add(ctx, sum, ggml_view_2d(ctx, weighted, embd, rows, weighted->nb[2], k*weighted->nb[1]));
+                    }
+                    return sum;
+                };
+                auto * ref_up = ggml_mul_mat_id(rc, weights[0], input_ref, ids_ref);
+                auto * ref_gate = ggml_mul_mat_id(rc, weights[1], input_ref, ids_ref);
+                auto * ref_down = ggml_mul_mat_id(rc, weights[2], activation(rc, ref_up, ref_gate), ids_ref);
+                auto * ref_out = reduce(rc, ref_down, routes_ref);
+                auto * ref_graph = ggml_new_graph(rc);
+                ggml_build_forward_expand(ref_graph, ref_out);
+                ggml_backend_buffer_ptr ref_buffer(ggml_backend_alloc_ctx_tensors(rc, cpu.get()));
+                if (!ref_buffer) {
+                    return false;
+                }
+                std::vector<int32_t> ids(experts*rows);
+                std::vector<float> route_weights(used*rows);
+                std::vector<int32_t> mapping(experts);
+                auto * input = ggml_dup_tensor(input_ctx.get(), input_ref);
+                auto * ids_full = ggml_dup_tensor(input_ctx.get(), ids_ref_full);
+                auto * ids_gpu = ggml_view_2d(input_ctx.get(), ids_full, used, rows, ids_full->nb[1], 0);
+                auto * routes = ggml_dup_tensor(input_ctx.get(), routes_ref);
+                ggml_backend_buffer_ptr input_buffer(ggml_backend_alloc_ctx_tensors(input_ctx.get(), backend));
+                if (!input_buffer) {
+                    return false;
+                }
+                ggml_backend_t backends[] = {backend, cpu.get()};
+                ggml_backend_sched_ptr sched(ggml_backend_sched_new(backends, nullptr, 2, 2048, false, true));
+                auto * graph = ggml_new_graph(gc);
+                auto * cpu_input = schedule ? ggml_cont(gc, input) : input;
+                auto * cpu_ids = schedule ? ggml_cont(gc, ids_gpu) : ids_gpu;
+                if (schedule) {
+                    ggml_backend_sched_set_tensor_backend(sched.get(), cpu_input, cpu.get());
+                    ggml_backend_sched_set_tensor_backend(sched.get(), cpu_ids, cpu.get());
+                    ggml_build_forward_expand(graph, cpu_input);
+                    ggml_build_forward_expand(graph, cpu_ids);
+                }
+                auto * cpu_up = ggml_mul_mat_id_cpu_masked(gc, weights[0], cpu_input, cpu_ids, host_map);
+                auto * cpu_gate = ggml_mul_mat_id_cpu_masked(gc, weights[1], cpu_input, cpu_ids, host_map);
+                auto * cpu_down = ggml_mul_mat_id_cpu_masked(gc, weights[2], activation(gc, cpu_up, cpu_gate), cpu_ids, host_map);
+                for (auto * t = ggml_get_first_tensor(gc); t; t = ggml_get_next_tensor(gc, t)) {
+                    ggml_backend_sched_set_tensor_backend(sched.get(), t, cpu.get());
+                    if (schedule && t != cpu_input && t != cpu_ids) {
+                        ggml_format_name(t, "fn_cache_cpu_test_%s", ggml_op_name(t->op));
+                    }
+                }
+                ggml_set_output(cpu_down);
+                size_t offset = permanent;
+                auto bind_gpu = [&](ggml_tensor * tensor, const char * name, int tile) {
+                    ggml_format_name(tensor, "fn_cache_gpu_test_%s_%d", name, tile);
+                    ggml_backend_sched_set_tensor_backend(sched.get(), tensor, backend);
+                    const size_t bytes = GGML_PAD(ggml_backend_buft_get_alloc_size(buft, tensor), 512);
+                    GGML_ASSERT(offset <= capacity && bytes <= capacity - offset);
+                    GGML_ASSERT(ggml_backend_tensor_alloc(arena.get(), tensor, base + offset) == GGML_STATUS_SUCCESS);
+                    offset += bytes;
+                    return tensor;
+                };
+                ggml_tensor * gpu_down = nullptr;
+                for (int first = 0; first < rows; first += 8) {
+                    const int count = std::min(8, rows - first);
+                    const int tile = first/8;
+                    auto * inp = ggml_view_3d(gc, input, embd, 1, count, input->nb[1], input->nb[2], first*input->nb[2]);
+                    auto * selected = ggml_view_2d(gc, ids_gpu, used, count, ids_gpu->nb[1], first*ids_gpu->nb[1]);
+                    selected = bind_gpu(ggml_cont(gc, selected), "ids", tile);
+                    selected = ggml_reshape_1d(gc, selected, used*count);
+                    selected = bind_gpu(ggml_get_rows(gc, schedule == 2 ? host_map : device_map, selected), "map", tile);
+                    selected = ggml_reshape_2d(gc, selected, used, count);
+                    auto * up = bind_gpu(ggml_mul_mat_id(gc, banks[0], inp, selected), "up", tile);
+                    auto * gate = bind_gpu(ggml_mul_mat_id(gc, banks[1], inp, selected), "gate", tile);
+                    ggml_tensor * act;
+                    if (limit > 0) {
+                        up = bind_gpu(ggml_clamp(gc, up, -limit, limit), "clamp_up", tile);
+                        gate = bind_gpu(ggml_silu(gc, gate), "silu", tile);
+                        gate = bind_gpu(ggml_clamp(gc, gate, -INFINITY, limit), "clamp_gate", tile);
+                        act = bind_gpu(ggml_mul(gc, gate, up), "act", tile);
+                    } else {
+                        act = bind_gpu(ggml_swiglu_split(gc, gate, up), "act", tile);
+                    }
+                    auto * down = bind_gpu(ggml_mul_mat_id(gc, banks[2], act, selected), "down", tile);
+                    gpu_down = gpu_down ? bind_gpu(ggml_concat(gc, gpu_down, down, 2), "concat", tile) : down;
+                }
+                ggml_set_output(gpu_down);
+                if (schedule) {
+                    ggml_build_forward_expand(graph, gpu_down);
+                }
+                auto * merged = ggml_add(gc, cpu_down, gpu_down);
+                ggml_set_output(merged);
+                ggml_backend_sched_set_tensor_backend(sched.get(), merged, backend);
+                auto * out = reduce(gc, merged, routes);
+                ggml_set_output(out);
+                ggml_build_forward_expand(graph, out);
+                if (!ggml_backend_sched_alloc_graph(sched.get(), graph)) {
+                    return false;
+                }
+                std::vector<float> actual(ggml_nelements(out));
+                std::vector<float> expected(actual.size());
+                std::vector<float> merged_values(ggml_nelements(merged));
+                std::vector<float> expert_values(merged_values.size());
+                std::vector<float> cpu_values(merged_values.size());
+                std::vector<float> gpu_values(merged_values.size());
+                bool ok = true;
+                double output_error = 0;
+                double expert_error = 0;
+                // Reuse the exact graph and tensor addresses: call 2 captures after warmup,
+                // calls 3 and 4 replay with different maps, IDs, activations, and route weights.
+                for (int run = 0; run < 4; ++run) {
+                    const int run_mode = (mode + run) % 3;
+                    init_stable(input_ref, 1.0f);
+                    for (int e = 0; e < experts; ++e) {
+                        mapping[e] = run_mode == 1 || (run_mode == 2 && (e + run) % 2) ? 1 + (5*e) % experts : 0;
+                    }
+                    for (int t = 0; t < rows; ++t) {
+                        float sum = 0;
+                        for (int k = 0; k < experts; ++k) {
+                            ids[t*experts + k] = (3*k + t + 5*run) % experts;
+                        }
+                        for (int k = 0; k < used; ++k) {
+                            sum += route_weights[t*used + k] = float(1 + (k + 3*t + run) % used);
+                        }
+                        for (int k = 0; k < used; ++k) {
+                            route_weights[t*used + k] /= sum;
+                        }
+                    }
+                    ggml_backend_tensor_set(ids_ref_full, ids.data(), 0, ids.size()*sizeof(int32_t));
+                    ggml_backend_tensor_set(routes_ref, route_weights.data(), 0, route_weights.size()*sizeof(float));
+                    ggml_backend_tensor_set(host_map, mapping.data(), 0, mapping.size()*sizeof(int32_t));
+                    ggml_backend_tensor_set_async(backend, device_map, mapping.data(), 0, mapping.size()*sizeof(int32_t));
+                    ggml_backend_tensor_set_async(backend, input, input_ref->data, 0, ggml_nbytes(input_ref));
+                    ggml_backend_tensor_set_async(backend, ids_full, ids.data(), 0, ids.size()*sizeof(int32_t));
+                    ggml_backend_tensor_set_async(backend, routes, route_weights.data(), 0, route_weights.size()*sizeof(float));
+                    if (ggml_backend_graph_compute(cpu.get(), ref_graph) != GGML_STATUS_SUCCESS ||
+                        ggml_backend_sched_graph_compute(sched.get(), graph) != GGML_STATUS_SUCCESS) {
+                        return false;
+                    }
+                    ggml_backend_sched_synchronize(sched.get());
+                    ggml_backend_tensor_get(out, actual.data(), 0, ggml_nbytes(out));
+                    ggml_backend_tensor_get(ref_out, expected.data(), 0, ggml_nbytes(ref_out));
+                    ggml_backend_tensor_get(merged, merged_values.data(), 0, ggml_nbytes(merged));
+                    ggml_backend_tensor_get(ref_down, expert_values.data(), 0, ggml_nbytes(ref_down));
+                    ggml_backend_tensor_get(cpu_down, cpu_values.data(), 0, ggml_nbytes(cpu_down));
+                    ggml_backend_tensor_get(gpu_down, gpu_values.data(), 0, ggml_nbytes(gpu_down));
+                    const double run_output_error = nmse(expected.data(), actual.data(), actual.size());
+                    const double run_expert_error = nmse(expert_values.data(), merged_values.data(), merged_values.size());
+                    bool run_ok = std::isfinite(run_output_error) && std::isfinite(run_expert_error) &&
+                                  run_output_error <= 1e-3 && run_expert_error <= 1e-3;
+                    output_error = std::max(output_error, run_output_error);
+                    expert_error = std::max(expert_error, run_expert_error);
+                    for (int t = 0; t < rows; ++t) {
+                        for (int k = 0; k < used; ++k) {
+                            const bool hit = mapping[ids[t*experts + k]] > 0;
+                            for (int r = 0; r < embd; ++r) {
+                                const size_t i = (t*used + k)*embd + r;
+                                run_ok = run_ok && (hit ? cpu_values[i] == 0.0f : gpu_values[i] == 0.0f);
+                            }
+                        }
+                    }
+                    std::vector<float> serial;
+                    if (schedule == 1) {
+                        // Keep the exact inputs and graph, but force the ordinary
+                        // split barriers through the existing evaluation callback.
+                        // This distinguishes overlap corruption from CPU/CUDA
+                        // quantization error without changing the acceptance limit.
+                        ggml_backend_sched_set_eval_callback(sched.get(), [](ggml_tensor *, bool, void *) {
+                            return false;
+                        }, nullptr);
+                        const auto serial_status = ggml_backend_sched_graph_compute(sched.get(), graph);
+                        ggml_backend_sched_synchronize(sched.get());
+                        ggml_backend_sched_set_eval_callback(sched.get(), nullptr, nullptr);
+                        serial.resize(actual.size());
+                        ggml_backend_tensor_get(out, serial.data(), 0, ggml_nbytes(out));
+                        ++serial_checks;
+                        run_ok = run_ok && serial_status == GGML_STATUS_SUCCESS && actual == serial;
+                        if (!run_ok) {
+                            printf("  MOE_CACHE_HYBRID serial diagnostic: status=%d, cpu_nmse=%.9g, overlap_nmse=%.9g, identical=%s\n",
+                                   int(serial_status), nmse(expected.data(), serial.data(), serial.size()),
+                                   nmse(actual.data(), serial.data(), serial.size()),
+                                   actual == serial ? "yes" : "no");
+                        }
+                    }
+                    if (!run_ok) {
+                        printf("  MOE_CACHE_HYBRID failed on replay %d (mode=%d,seed=%u)\n", run, run_mode, test_seed);
+                        if (const char * artifact_dir = getenv("GGML_MOE_CACHE_TEST_ARTIFACT_DIR")) {
+                            auto * artifact = gguf_init_empty();
+                            gguf_set_val_u32(artifact, "test.seed", test_seed);
+                            gguf_set_val_u32(artifact, "test.schedule", schedule);
+                            gguf_set_val_u32(artifact, "test.run", run);
+                            gguf_set_val_u32(artifact, "test.mode", mode);
+                            auto add = [&](const char * name, const ggml_tensor * tensor, const void * data = nullptr) {
+                                ggml_tensor saved = *tensor;
+                                ggml_set_name(&saved, name);
+                                if (data) { saved.data = const_cast<void *>(data); }
+                                gguf_add_tensor(artifact, &saved);
+                            };
+                            add("up", weights[0]);
+                            add("gate", weights[1]);
+                            add("down", weights[2]);
+                            add("input", input_ref);
+                            add("ids", ids_ref_full);
+                            add("routes", routes_ref);
+                            add("map", host_map);
+                            add("cpu_output", ref_out, expected.data());
+                            add("actual_output", ref_out, actual.data());
+                            if (!serial.empty()) { add("serial_output", ref_out, serial.data()); }
+                            const auto path = std::string(artifact_dir) + "/moe-cache-" + ggml_backend_dev_name(dev) + "-" +
+                                    ggml_type_name(types[0]) + "-" + ggml_type_name(types[2]) + "-" +
+                                    std::to_string(rows) + "-" + std::to_string(schedule) + "-" +
+                                    std::to_string(mode) + "-" + std::to_string(run) + ".gguf";
+                            printf("  MOE_CACHE_HYBRID failure artifact: %s (%s)\n", path.c_str(),
+                                   gguf_write_to_file(artifact, path.c_str(), false) ? "saved" : "write failed");
+                            gguf_free(artifact);
+                        }
+                    }
+                    ok = ok && run_ok;
+                }
+                ++cases;
+                failures += !ok;
+                printf("  MOE_CACHE_HYBRID(up=%s,down=%s,rows=%d,mode=%d,clamp=%.0f,runs=4): %s, expert_nmse=%.3g, output_nmse=%.3g\n",
+                       ggml_type_name(types[0]), ggml_type_name(types[2]), rows, mode, limit,
+                       ok ? "OK" : "FAIL", expert_error, output_error);
+            }
+        }
+    }
+    printf("  MOE_CACHE_HYBRID: %d cases, %d evaluations, %d failures\n", cases, cases*4, failures);
+    if (schedule == 1) {
+        printf("  MOE_CACHE_HYBRID: %d same-input serial comparisons\n", serial_checks);
+    }
+    return failures == 0;
+}
+
+static bool test_moe_cache_lifecycle(ggml_backend_t backend, ggml_backend_dev_t dev) {
+    auto reg = ggml_backend_dev_backend_reg(dev);
+    if (strcmp(ggml_backend_reg_name(reg), "CUDA") != 0) {
+        printf("  MOE_CACHE_LIFECYCLE: skipped non-CUDA backend\n");
+        return true;
+    }
+    auto setup = (ggml_cuda_moe_stream_setup_t) ggml_backend_reg_get_proc_address(reg, GGML_MOE_STREAM_PROC_SETUP);
+    auto teardown = (ggml_cuda_moe_stream_teardown_t) ggml_backend_reg_get_proc_address(reg, GGML_MOE_STREAM_PROC_TEARDOWN);
+    auto phase = (ggml_cuda_moe_stream_mode_t) ggml_backend_reg_get_proc_address(reg, GGML_MOE_STREAM_PROC_MODE);
+    auto submit = (ggml_cuda_moe_cache_copy_t) ggml_backend_reg_get_proc_address(reg, GGML_MOE_STREAM_PROC_COPY);
+    auto query = (ggml_cuda_moe_cache_query_t) ggml_backend_reg_get_proc_address(reg, GGML_MOE_STREAM_PROC_QUERY);
+    auto drain = (ggml_cuda_moe_cache_drain_t) ggml_backend_reg_get_proc_address(reg, GGML_MOE_STREAM_PROC_DRAIN);
+    auto begin = (ggml_cuda_moe_stream_begin_t) ggml_backend_reg_get_proc_address(reg, GGML_MOE_STREAM_PROC_BEGIN);
+    if (!setup || !teardown || !phase || !submit || !query || !drain || !begin) {
+        return false;
+    }
+    int device = -1;
+    for (size_t i = 0; i < ggml_backend_reg_dev_count(reg); ++i) {
+        if (ggml_backend_reg_dev_get(reg, i) == dev) {
+            device = (int) i;
+        }
+    }
+    const size_t capacity = 65536;
+    ggml_context_ptr ctx(ggml_init({1 << 20, nullptr, true}));
+    ggml_backend_buffer_ptr buffer(ggml_backend_buft_alloc_buffer(ggml_backend_dev_buffer_type(dev), capacity));
+    if (!ctx || !buffer) {
+        return false;
+    }
+    char * base = (char *) ggml_backend_buffer_get_base(buffer.get());
+    auto tensor = ggml_new_tensor_1d(ctx.get(), GGML_TYPE_I8, capacity);
+    if (ggml_backend_tensor_alloc(buffer.get(), tensor, base) != GGML_STATUS_SUCCESS) {
+        return false;
+    }
+    std::array<std::array<uint8_t, 64>, 3> host{};
+    ggml_cuda_moe_stream_layer layer{};
+    ggml_cuda_moe_stream_slot slot{};
+    ggml_cuda_moe_stream_params params{};
+    slot.dev = base;
+    slot.cap = capacity;
+    params.device = device;
+    params.owner = 0x4341434845ULL;
+    params.n_slots = 1;
+    params.pin_host = 1;
+    for (int f = 0; f < 3; ++f) {
+        host[f].fill((uint8_t) (17 + f));
+        layer.host[f] = host[f].data();
+        layer.nbytes[f] = slot.nbytes[f] = host[f].size();
+        layer.dst_off[f] = f*256;
+    }
+    if (setup(&params, &layer, 1, &slot, 1) != 0) {
+        return false;
+    }
+    bool ok = true;
+    int checks = 0;
+    auto check = [&](bool condition, const char * label) {
+        ++checks;
+        if (!condition) {
+            printf("  MOE_CACHE_LIFECYCLE failed: %s\n", label);
+            ok = false;
+        }
+    };
+    auto other = params;
+    other.owner++;
+    check(setup(&other, &layer, 1, &slot, 1) != 0, "second owner rejected");
+    teardown(device, other.owner);
+    check(phase(device, other.owner, 1) != 0, "foreign phase rejected");
+    check(phase(device, params.owner, 1) == 0, "enter cache after foreign teardown");
+    auto pre = ggml_moe_stream_fence(ctx.get(), tensor, nullptr, 0, 0, 0, -1, -1);
+    auto post = ggml_moe_stream_fence(ctx.get(), pre, tensor, 0, 1, 0, -1, -1);
+    auto graph = ggml_new_graph(ctx.get());
+    ggml_build_forward_expand(graph, post);
+    ggml_backend_buffer_ptr graph_buffer(ggml_backend_alloc_ctx_tensors(ctx.get(), backend));
+    check(graph_buffer != nullptr, "fence allocation");
+    for (int cycle = 0; ok && cycle < 3; ++cycle) {
+        for (uint64_t tag = 0; tag < 64; ++tag) {
+            ggml_cuda_moe_cache_copy copy{};
+            copy.tag = tag;
+            for (int f = 0; f < 3; ++f) {
+                copy.host[f] = host[f].data();
+                copy.dst[f] = base + 4096 + tag*256 + f*64;
+                copy.nbytes[f] = 64;
+            }
+            check(submit(device, params.owner, &copy) == 0, "bounded queued copy");
+        }
+        ggml_cuda_moe_cache_copy extra{};
+        extra.tag = 64;
+        extra.dst[0] = base;
+        extra.nbytes[0] = 64;
+        check(submit(device, params.owner, &extra) != 0, "queue capacity enforced");
+        check(drain(device, params.owner) == 0, "drain pending copies");
+        std::array<uint8_t, 64> actual{};
+        for (uint64_t tag = 0; tag < 64; ++tag) {
+            check(query(device, params.owner, tag, 1) == 1, "completed tag");
+            check(query(device, params.owner, tag, 0) == -1, "tag consumed once");
+            for (int f = 0; f < 3; ++f) {
+                ggml_backend_tensor_get(tensor, actual.data(), 4096 + tag*256 + f*64, actual.size());
+                check(actual == host[f], "all copied bytes match");
+            }
+        }
+        extra.dst[0] = base + capacity - 16;
+        check(submit(device, params.owner, &extra) != 0, "out of extent rejected");
+        extra.dst[0] = base;
+        extra.nbytes[0] = 1024;
+        check(submit(device, params.owner, &extra) == 0, "zero old prefill image");
+        check(query(device, params.owner, extra.tag, 1) == 1, "zero complete");
+        check(phase(device, params.owner, 0) == 0, "resume prefill");
+        const int32_t zero = 0;
+        begin(device, &zero, &zero, 1);
+        check(ggml_backend_graph_compute(backend, graph) == GGML_STATUS_SUCCESS, "prefill fences after cache");
+        ggml_backend_synchronize(backend);
+        for (int f = 0; f < 3; ++f) {
+            ggml_backend_tensor_get(tensor, actual.data(), f*256, actual.size());
+            check(actual == host[f], "prefill reloads overwritten layer");
+        }
+        check(phase(device, params.owner, 1) == 0, "return to cache");
+    }
+    if (ok) {
+        ggml_cuda_moe_cache_copy pending{};
+        pending.dst[0] = base + 32768;
+        pending.nbytes[0] = 4096;
+        for (uint64_t tag = 1000; tag < 1064; ++tag) {
+            pending.tag = tag;
+            check(submit(device, params.owner, &pending) == 0, "queue before cancellation");
+        }
+        check(phase(device, params.owner, 0) == 0, "park with pending copies");
+        check(query(device, params.owner, 1063, 0) == -1, "phase change invalidates old tags");
+    }
+    ggml_backend_synchronize(backend);
+    teardown(device, params.owner);
+    check(phase(device, params.owner, 1) != 0, "owner removed on teardown");
+    printf("  MOE_CACHE_LIFECYCLE: %d checks, %s\n", checks, ok ? "OK" : "FAIL");
+    return ok;
+}
+
 static bool test_backend(ggml_backend_t backend, ggml_backend_dev_t dev, test_mode mode, const char * op_names_filter, const char * params_filter,
                          printer * output_printer, const char * test_file_path, int parallel_workers) {
+    if (mode == MODE_TEST && op_names_filter && strcmp(op_names_filter, "MOE_CACHE_LIFECYCLE") == 0) {
+        return test_moe_cache_lifecycle(backend, dev);
+    }
+    if (mode == MODE_TEST && op_names_filter && strcmp(op_names_filter, "MOE_CACHE_HYBRID") == 0) {
+        return test_moe_cache_hybrid(backend, dev);
+    }
+    if (mode == MODE_TEST && op_names_filter && strcmp(op_names_filter, "MOE_CACHE_OVERLAP") == 0) {
+        return test_moe_cache_hybrid(backend, dev, 1);
+    }
+    if (mode == MODE_TEST && op_names_filter && strcmp(op_names_filter, "MOE_CACHE_OVERLAP_HOST_REJECT") == 0) {
+        return test_moe_cache_hybrid(backend, dev, 2);
+    }
     auto filter_test_cases = [](std::vector<std::unique_ptr<test_case>> & test_cases, const char * params_filter) {
         if (params_filter == nullptr) {
             return;
@@ -11806,11 +12482,11 @@ static void show_test_coverage() {
 
     printf("Operations covered by tests (%zu):\n", covered_ops.size());
     for (const auto & op : covered_ops) {
-        printf("  ✓ %s\n", op.c_str());
+        printf("  âœ“ %s\n", op.c_str());
     }
     printf("\nOperations without tests (%zu):\n", uncovered_ops.size());
     for (const auto & op : uncovered_ops) {
-        printf("  ✗ %s\n", op.c_str());
+        printf("  âœ— %s\n", op.c_str());
     }
 
     printf("\nCoverage Summary:\n");

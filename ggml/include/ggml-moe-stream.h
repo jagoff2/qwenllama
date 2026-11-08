@@ -52,6 +52,15 @@ struct ggml_cuda_moe_stream_params {
     int      pin_host;       // 1 = stage through a pinned host ring, 0 = cudaMemcpyAsync from pageable
     size_t   pin_bytes;      // pinned staging bytes per device (0 -> engine default when pin_host)
     int      device;         // CUDA device ordinal these params apply to
+    uint64_t owner;          // context identity; a second owner cannot replace a live engine
+};
+
+struct ggml_cuda_moe_cache_copy {
+    uint64_t tag;
+    const void * host[GGML_MOE_STREAM_MAX_FAMILIES]; // null means clear the destination
+    void * dst[GGML_MOE_STREAM_MAX_FAMILIES];
+    size_t nbytes[GGML_MOE_STREAM_MAX_FAMILIES];
+    size_t pad_bytes[GGML_MOE_STREAM_MAX_FAMILIES];
 };
 
 // Aggregated telemetry. Everything is a running total since the last reset; the caller prints deltas.
@@ -72,12 +81,17 @@ struct ggml_cuda_moe_stream_stats {
 };
 
 // Proc-address names exported by the CUDA backend device registry.
-#define GGML_MOE_STREAM_PROC_SETUP   "ggml_cuda_moe_stream_setup_v2"
-#define GGML_MOE_STREAM_PROC_TEARDOWN "ggml_cuda_moe_stream_teardown"
+#define GGML_MOE_STREAM_PROC_SETUP   "ggml_cuda_moe_stream_setup_v3"
+#define GGML_MOE_STREAM_PROC_TEARDOWN "ggml_cuda_moe_stream_teardown_v3"
 #define GGML_MOE_STREAM_PROC_STATS   "ggml_cuda_moe_stream_stats"
 #define GGML_MOE_STREAM_PROC_RESET   "ggml_cuda_moe_stream_reset"
 #define GGML_MOE_STREAM_PROC_ACTIVE  "ggml_cuda_moe_stream_active"
 #define GGML_MOE_STREAM_PROC_BEGIN   "ggml_cuda_moe_stream_begin"
+#define GGML_MOE_STREAM_PROC_MODE    "ggml_cuda_moe_stream_mode_v3"
+#define GGML_MOE_STREAM_PROC_COPY    "ggml_cuda_moe_cache_copy_v3"
+#define GGML_MOE_STREAM_PROC_QUERY   "ggml_cuda_moe_cache_query_v3"
+#define GGML_MOE_STREAM_PROC_DRAIN   "ggml_cuda_moe_cache_drain_v3"
+#define GGML_MOE_STREAM_PROC_SCRATCH "ggml_cuda_moe_cache_scratch_v3"
 
 typedef int  (*ggml_cuda_moe_stream_setup_t)(
         const struct ggml_cuda_moe_stream_params   * params,
@@ -85,7 +99,14 @@ typedef int  (*ggml_cuda_moe_stream_setup_t)(
         int                                          n_layers,
         const struct ggml_cuda_moe_stream_slot     * slots,
         int                                          n_slots);
-typedef void (*ggml_cuda_moe_stream_teardown_t)(int device);
+typedef void (*ggml_cuda_moe_stream_teardown_t)(int device, uint64_t owner);
+// Caller must synchronize graph readers first. mode: 0 = prefill, 1 = cache, 2 = parked.
+typedef int (*ggml_cuda_moe_stream_mode_t)(int device, uint64_t owner, int mode);
+typedef int (*ggml_cuda_moe_cache_copy_t)(int device, uint64_t owner, const struct ggml_cuda_moe_cache_copy * copy);
+// 0 = pending, 1 = complete, -1 = failed/unknown. Terminal queries consume the tag.
+typedef int (*ggml_cuda_moe_cache_query_t)(int device, uint64_t owner, uint64_t tag, int wait);
+typedef int (*ggml_cuda_moe_cache_drain_t)(int device, uint64_t owner);
+typedef int (*ggml_cuda_moe_cache_scratch_t)(int device, uint64_t owner, void * base, size_t bytes);
 typedef void (*ggml_cuda_moe_stream_stats_t)(int device, struct ggml_cuda_moe_stream_stats * out);
 typedef void (*ggml_cuda_moe_stream_reset_t)(int device);
 typedef int  (*ggml_cuda_moe_stream_active_t)(int device);

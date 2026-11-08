@@ -424,6 +424,7 @@ extern "C" {
         // arena slots so the GEMMs run on the GPU and the PCIe transfer overlaps the compute.
         // every field is inert while moe_stream_enable is false (the baseline path).
         bool     moe_stream_enable;       // opt-in: stream host-resident expert weights on device
+        bool     moe_decode_cache;        // share streamed expert buffers with the decode cache
         uint32_t moe_stream_slots;        // arena slots per device (>= 2 overlaps transfer with compute)
         uint32_t moe_stream_min_tokens;   // stream micro-batches of at least this many tokens
         uint32_t moe_stream_pin;          // stage host->device copies through pinned host memory
@@ -1006,6 +1007,18 @@ extern "C" {
     LLAMA_API int32_t llama_decode(
             struct llama_context * ctx,
               struct llama_batch   batch);
+
+    enum llama_decode_purpose {
+        LLAMA_DECODE_AUTO = 0,
+        LLAMA_DECODE_PROMPT,
+        LLAMA_DECODE_GENERATION,
+    };
+
+    // Call-scoped scheduling hint. Does not change token, attention, or sampling semantics.
+    LLAMA_API int32_t llama_decode_with_purpose(
+            struct llama_context * ctx,
+              struct llama_batch   batch,
+        enum llama_decode_purpose  purpose);
 
     // Set the number of threads used for decoding
     // n_threads is the number of threads used for generation (single token)

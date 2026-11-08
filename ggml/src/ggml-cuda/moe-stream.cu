@@ -23,6 +23,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstring>
+#include <deque>
 #include <map>
 #include <mutex>
 #include <thread>
@@ -38,6 +39,7 @@
 #define FN_MOE_STAGE_CHUNKS      8
 #define FN_MOE_STAGE_CHUNK_MIN   (32u << 20)
 #define FN_MOE_STAGE_CHUNK_MAX   (128u << 20)
+#define FN_MOE_CACHE_MAX_PENDING 64
 
 namespace {
 
@@ -80,8 +82,14 @@ struct fn_job {
     int layer;
 };
 
+struct fn_cache_completion {
+    cudaEvent_t event = nullptr;
+    bool submitted = false;
+};
+
 struct fn_engine {
     int  device   = -1;
+    uint64_t owner = 0;
     bool active   = false;
     bool pin_host = false;
     bool poisoned = false;
@@ -99,6 +107,15 @@ struct fn_engine {
     std::vector<std::vector<fn_job>> q_slot;
     int                     rr = 0;    // round-robin start so no slot starves
     bool                    stop = false;
+    bool                    pause = false;
+    bool                    parked = false;
+    bool                    busy = false;
+    bool                    alive = true;
+    int                     mode = 0;
+    std::deque<ggml_cuda_moe_cache_copy> cache_q;
+    std::map<uint64_t, fn_cache_completion> cache_done;
+    void *                  cache_scratch = nullptr;
+    size_t                  cache_scratch_bytes = 0;
 
     ggml_cuda_moe_stream_stats st;
 };
@@ -114,14 +131,101 @@ fn_engine * engine_get(int device) {
     return g_eng[device];
 }
 
+fn_engine * engine_owned(int device, uint64_t owner) {
+    fn_engine * e = engine_get(device);
+    return e && owner != 0 && e->owner == owner ? e : nullptr;
+}
+
+bool engine_contains(const fn_engine * e, const void * ptr, size_t bytes) {
+    const uintptr_t addr = reinterpret_cast<uintptr_t>(ptr);
+    for (const auto & slot : e->slots) {
+        const uintptr_t base = reinterpret_cast<uintptr_t>(slot.dev);
+        if (addr >= base && addr - base <= slot.cap && bytes <= slot.cap - (addr - base)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 void engine_poison(fn_engine * e, const char * what, cudaError_t err) {
     std::lock_guard<std::mutex> lock(e->m);
     if (!e->poisoned) {
         e->poisoned = true;
     }
     e->st.n_error++;
+    e->cv_fill.notify_all();
     GGML_LOG_ERROR("%s: %s (%s) - disabling streamed experts\n", __func__, what,
                    err != cudaSuccess ? cudaGetErrorName(err) : "logic");
+}
+
+struct fn_worker_exit {
+    fn_engine * e;
+    ~fn_worker_exit() {
+        std::lock_guard<std::mutex> lock(e->m);
+        e->alive = false;
+        e->busy = false;
+        e->cv_fill.notify_all();
+    }
+};
+
+struct fn_worker_done {
+    fn_engine * e;
+    ~fn_worker_done() {
+        std::lock_guard<std::mutex> lock(e->m);
+        e->busy = false;
+        e->cv_fill.notify_all();
+    }
+};
+
+void worker_cache_copy(fn_engine * e, const ggml_cuda_moe_cache_copy & copy) {
+    // Reuse one pinned mirror only after its previous DMA has completed.
+    cudaError_t err = cudaStreamSynchronize(e->copy_stream);
+    char * pin = e->slots[0].pin;
+    const size_t cap = e->slots[0].cap;
+    for (int f = 0; err == cudaSuccess && f < GGML_MOE_STREAM_MAX_FAMILIES; ++f) {
+        char * dst = static_cast<char *>(copy.dst[f]);
+        const char * src = static_cast<const char *>(copy.host[f]);
+        size_t remaining = copy.nbytes[f];
+        if (remaining && !src) {
+            err = cudaMemsetAsync(dst, 0, remaining, e->copy_stream);
+        } else if (remaining && !pin) {
+            err = cudaMemcpyAsync(dst, src, remaining, cudaMemcpyHostToDevice, e->copy_stream);
+        } else {
+            while (remaining && err == cudaSuccess) {
+                const size_t chunk = std::min(remaining, cap);
+                std::memcpy(pin, src, chunk);
+                err = cudaMemcpyAsync(dst, pin, chunk, cudaMemcpyHostToDevice, e->copy_stream);
+                // The same staging span is reused for the next family/chunk.
+                if (err == cudaSuccess) {
+                    err = cudaStreamSynchronize(e->copy_stream);
+                }
+                src += chunk;
+                dst += chunk;
+                remaining -= chunk;
+            }
+        }
+        if (err == cudaSuccess && copy.pad_bytes[f]) {
+            err = cudaMemsetAsync(static_cast<char *>(copy.dst[f]) + copy.nbytes[f], 0,
+                                  copy.pad_bytes[f], e->copy_stream);
+        }
+    }
+    cudaEvent_t event = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(e->m);
+        event = e->cache_done.at(copy.tag).event;
+    }
+    if (err == cudaSuccess) {
+        err = cudaEventRecord(event, e->copy_stream);
+    }
+    if (err != cudaSuccess) {
+        engine_poison(e, "cache expert copy failed", err);
+        return;
+    }
+    {
+        std::lock_guard<std::mutex> lock(e->m);
+        e->cache_done.at(copy.tag).submitted = true;
+    }
+    e->cv_fill.notify_all();
 }
 
 // split a large memcpy across threads: the stage copy is pure DDR traffic and one core cannot
@@ -163,12 +267,16 @@ void fn_parallel_memcpy(void * dst, const void * src, size_t n) {
 
 // the worker owns: wait for slot release -> optionally stage into pinned memory -> async H2D -> record
 void worker_main(fn_engine * e) {
+    fn_worker_exit exited{e};
     if (cudaSetDevice(e->device) != cudaSuccess) {
         engine_poison(e, "worker cannot select device", cudaErrorInvalidDevice);
         return;
     }
 
     const auto queued = [e] {
+        if (e->mode == 1) {
+            return !e->cache_q.empty();
+        }
         for (const auto & q : e->q_slot) {
             if (!q.empty()) {
                 return true;
@@ -181,13 +289,31 @@ void worker_main(fn_engine * e) {
         fn_job job;
         ggml_cuda_moe_stream_layer ldesc;
         fn_slot * sp = nullptr;
+        ggml_cuda_moe_cache_copy cache_copy{};
+        bool cache_job = false;
 
         {
             std::unique_lock<std::mutex> lock(e->m);
-            e->cv_fill.wait(lock, [&] { return e->stop || queued(); });
+            e->cv_fill.wait(lock, [&] { return e->stop || e->pause || e->poisoned || queued(); });
             if (e->stop) {
                 return;
             }
+            if (e->pause || e->poisoned) {
+                e->parked = true;
+                e->cv_fill.notify_all();
+                e->cv_fill.wait(lock, [&] { return e->stop || (!e->pause && !e->poisoned); });
+                e->parked = false;
+                if (e->stop) {
+                    return;
+                }
+                continue;
+            }
+            if (e->mode == 1) {
+                cache_copy = e->cache_q.front();
+                e->cache_q.pop_front();
+                cache_job = true;
+                e->busy = true;
+            } else {
 
             // a slot may be written once a read of it has been released (credit) - a fill that only
             // re-publishes an image the slot already holds needs no credit because it writes nothing.
@@ -241,6 +367,14 @@ void worker_main(fn_engine * e) {
             }
             ldesc = it->second;
             ++e->st.n_worker_wake;
+            e->busy = true;
+            }
+        }
+
+        fn_worker_done done{e};
+        if (cache_job) {
+            worker_cache_copy(e, cache_copy);
+            continue;
         }
 
         // 1. the slot must no longer be read by compute. the credit picked above proved that a release
@@ -421,6 +555,13 @@ void engine_release(fn_engine * e) {
     if (e->worker.joinable()) {
         e->worker.join();
     }
+    // No producer can submit more work after the join.
+    if (e->copy_stream) {
+        cudaStreamSynchronize(e->copy_stream);
+    }
+    for (auto & item : e->cache_done) {
+        cudaEventDestroy(item.second.event);
+    }
     for (auto & s : e->slots) {
         if (s.ev_filled) {
             cudaEventDestroy(s.ev_filled);
@@ -441,7 +582,7 @@ void engine_release(fn_engine * e) {
 
 bool queue_fill(fn_engine * e, int slot, int layer) {
     std::lock_guard<std::mutex> lock(e->m);
-    if (e->poisoned || e->stop) {
+    if (e->poisoned || e->stop || e->pause || e->mode != 0) {
         return false;
     }
     if (slot < 0 || slot >= (int) e->slots.size()) {
@@ -498,6 +639,10 @@ void ggml_cuda_op_moe_stream_fence(ggml_backend_cuda_context & ctx, ggml_tensor 
         // the op is only emitted when the engine was active at graph build time
         GGML_ABORT("%s: streamed expert engine is not configured for device %d (layer %d)",
                    __func__, ctx.device, layer);
+    }
+    {
+        std::lock_guard<std::mutex> lock(e->m);
+        GGML_ASSERT(e->mode == 0 && !e->pause);
     }
 
     cudaStream_t stream = ctx.stream();
@@ -588,24 +733,19 @@ int ggml_cuda_moe_stream_setup_impl(const struct ggml_cuda_moe_stream_params * p
                                     const struct ggml_cuda_moe_stream_layer  * layers, int n_layers,
                                     const struct ggml_cuda_moe_stream_slot   * slots,  int n_slots) {
     if (params == nullptr || slots == nullptr || n_slots <= 0 || params->device < 0 ||
-        params->device >= FN_MOE_MAX_DEVICES) {
+        params->device >= FN_MOE_MAX_DEVICES || params->owner == 0) {
         return -1;
     }
 
     std::unique_lock<std::mutex> lock(g_eng_mtx);
-    fn_engine * prev = g_eng[params->device];
-    if (prev) {
-        // replacing a live engine: tear it down first so its worker cannot touch freed arenas
-        g_eng[params->device] = nullptr;
-    }
-    lock.unlock();
-
-    if (prev) {
-        engine_release(prev);
+    if (g_eng[params->device]) {
+        GGML_LOG_WARN("%s: device %d already has an expert pool owner\n", __func__, params->device);
+        return -7;
     }
 
     fn_engine * e = new fn_engine();
     e->device   = params->device;
+    e->owner    = params->owner;
     e->pin_host = params->pin_host != 0;
 
     if (cudaSetDevice(e->device) != cudaSuccess) {
@@ -667,9 +807,7 @@ int ggml_cuda_moe_stream_setup_impl(const struct ggml_cuda_moe_stream_params * p
     e->active = true;
     e->worker = std::thread(worker_main, e);
 
-    g_eng_mtx.lock();
     g_eng[e->device] = e;
-    g_eng_mtx.unlock();
 
     GGML_LOG_INFO("%s: device %d armed with %d expert arena slot(s), %.1f MiB each, pinned staging %s\n",
                   __func__, e->device, n_slots, e->slots[0].total / 1048576.0,
@@ -677,16 +815,166 @@ int ggml_cuda_moe_stream_setup_impl(const struct ggml_cuda_moe_stream_params * p
     return 0;
 }
 
-void ggml_cuda_moe_stream_teardown_impl(int device) {
+void ggml_cuda_moe_stream_teardown_impl(int device, uint64_t owner) {
     fn_engine * e = nullptr;
     {
         std::lock_guard<std::mutex> lock(g_eng_mtx);
-        if (device >= 0 && device < FN_MOE_MAX_DEVICES) {
+        if (device >= 0 && device < FN_MOE_MAX_DEVICES && g_eng[device] && g_eng[device]->owner == owner) {
             e = g_eng[device];
             g_eng[device] = nullptr;
         }
     }
     engine_release(e);
+}
+
+int ggml_cuda_moe_cache_drain_impl(int device, uint64_t owner) {
+    fn_engine * e = engine_owned(device, owner);
+    if (!e || cudaSetDevice(device) != cudaSuccess) {
+        return -1;
+    }
+    {
+        std::unique_lock<std::mutex> lock(e->m);
+        if (e->mode != 1 || e->pause || !e->cv_fill.wait_for(lock,
+                std::chrono::milliseconds(FN_MOE_SUBMIT_TIMEOUT_MS), [&] {
+                    return e->poisoned || e->stop || !e->alive || (e->cache_q.empty() && !e->busy);
+                }) || e->poisoned || e->stop || !e->alive) {
+            return -1;
+        }
+    }
+    const cudaError_t err = cudaStreamSynchronize(e->copy_stream);
+    if (err != cudaSuccess) {
+        engine_poison(e, "cannot drain expert cache copies", err);
+        return -1;
+    }
+    return 0;
+}
+
+int ggml_cuda_moe_stream_mode_impl(int device, uint64_t owner, int mode) {
+    fn_engine * e = engine_owned(device, owner);
+    if (!e || mode < 0 || mode > 2 || cudaSetDevice(device) != cudaSuccess) {
+        return -1;
+    }
+    {
+        std::unique_lock<std::mutex> lock(e->m);
+        if (e->mode == mode && !e->pause && !e->poisoned) {
+            return 0;
+        }
+        e->pause = true;
+        e->cv_fill.notify_all();
+        if (!e->cv_fill.wait_for(lock, std::chrono::milliseconds(FN_MOE_SUBMIT_TIMEOUT_MS),
+                [&] { return e->parked || !e->alive; })) {
+            return -1;
+        }
+    }
+    const cudaError_t err = cudaStreamSynchronize(e->copy_stream);
+    if (err != cudaSuccess) {
+        engine_poison(e, "cannot drain expert pool before phase change", err);
+        return -1;
+    }
+    std::lock_guard<std::mutex> lock(e->m);
+    if (e->poisoned || !e->alive) {
+        return -1;
+    }
+    for (auto & q : e->q_slot) {
+        q.clear();
+    }
+    e->cache_q.clear();
+    for (auto & item : e->cache_done) {
+        cudaEventDestroy(item.second.event);
+    }
+    e->cache_done.clear();
+    for (auto & slot : e->slots) {
+        slot.held_layer = slot.submitted_layer = slot.queued_layer = -1;
+        slot.pending = false;
+        slot.credits = 1;
+    }
+    e->mode = mode;
+    e->pause = mode == 2;
+    e->cache_scratch = nullptr;
+    e->cache_scratch_bytes = 0;
+    e->cv_fill.notify_all();
+    return 0;
+}
+
+int ggml_cuda_moe_cache_copy_impl(int device, uint64_t owner, const ggml_cuda_moe_cache_copy * copy) {
+    fn_engine * e = engine_owned(device, owner);
+    if (!e || !copy || cudaSetDevice(device) != cudaSuccess) {
+        return -1;
+    }
+    std::lock_guard<std::mutex> lock(e->m);
+    if (e->mode != 1 || e->pause || e->poisoned || e->stop ||
+            e->cache_done.size() >= FN_MOE_CACHE_MAX_PENDING || e->cache_done.count(copy->tag)) {
+        return -1;
+    }
+    for (int f = 0; f < GGML_MOE_STREAM_MAX_FAMILIES; ++f) {
+        if (copy->nbytes[f] > SIZE_MAX - copy->pad_bytes[f] ||
+                ((copy->nbytes[f] || copy->pad_bytes[f]) &&
+                 !engine_contains(e, copy->dst[f], copy->nbytes[f] + copy->pad_bytes[f]))) {
+            return -1;
+        }
+    }
+    fn_cache_completion completion;
+    if (cudaEventCreateWithFlags(&completion.event, cudaEventDisableTiming) != cudaSuccess) {
+        return -1;
+    }
+    e->cache_done.emplace(copy->tag, completion);
+    e->cache_q.push_back(*copy);
+    e->cv_fill.notify_all();
+    return 0;
+}
+
+int ggml_cuda_moe_cache_scratch_impl(int device, uint64_t owner, void * base, size_t bytes) {
+    fn_engine * e = engine_owned(device, owner);
+    if (!e || !base || !bytes || !engine_contains(e, base, bytes)) {
+        return -1;
+    }
+    std::lock_guard<std::mutex> lock(e->m);
+    if (e->mode != 1 || e->pause || e->poisoned || e->stop) {
+        return -1;
+    }
+    e->cache_scratch = base;
+    e->cache_scratch_bytes = bytes;
+    return 0;
+}
+
+void * ggml_cuda_moe_cache_scratch(int device, size_t bytes) {
+    fn_engine * e = engine_get(device);
+    GGML_ASSERT(e);
+    std::lock_guard<std::mutex> lock(e->m);
+    GGML_ASSERT(e->mode == 1 && !e->pause && !e->poisoned);
+    GGML_ASSERT(e->cache_scratch && bytes <= e->cache_scratch_bytes);
+    return e->cache_scratch;
+}
+
+int ggml_cuda_moe_cache_query_impl(int device, uint64_t owner, uint64_t tag, int wait) {
+    fn_engine * e = engine_owned(device, owner);
+    if (!e || cudaSetDevice(device) != cudaSuccess) {
+        return -1;
+    }
+    std::unique_lock<std::mutex> lock(e->m);
+    auto it = e->cache_done.find(tag);
+    if (it == e->cache_done.end()) {
+        return -1;
+    }
+    if (wait && !e->cv_fill.wait_for(lock, std::chrono::milliseconds(FN_MOE_SUBMIT_TIMEOUT_MS), [&] {
+            return e->poisoned || e->stop || !e->alive || it->second.submitted;
+        })) {
+        return -1;
+    }
+    if (e->poisoned || e->stop || !e->alive) {
+        // The worker can still reference this record until a phase drain/teardown.
+        return -1;
+    }
+    if (!it->second.submitted) {
+        return 0;
+    }
+    const cudaError_t err = wait ? cudaEventSynchronize(it->second.event) : cudaEventQuery(it->second.event);
+    if (err == cudaErrorNotReady) {
+        return 0;
+    }
+    cudaEventDestroy(it->second.event);
+    e->cache_done.erase(it);
+    return err == cudaSuccess ? 1 : -1;
 }
 
 void ggml_cuda_moe_stream_stats_impl(int device, struct ggml_cuda_moe_stream_stats * out) {

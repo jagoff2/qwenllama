@@ -10,6 +10,7 @@
 #include "llama-mmap.h"
 #include "llama-model.h"
 #include "llama-moe-stream.h"
+#include "llama-moe-cache.h"
 #include "llama-ext.h"
 #include "llama-sampler.h"
 #include "llama.h"
@@ -274,6 +275,10 @@ llama_context::llama_context(
     cparams.kv_unified = params.kv_unified;
 
     cparams.moe_stream_enable     = params.moe_stream_enable && cparams.ctx_type != LLAMA_CONTEXT_TYPE_MTP;
+    cparams.moe_decode_cache      = params.moe_decode_cache && cparams.ctx_type != LLAMA_CONTEXT_TYPE_MTP;
+    if (cparams.moe_decode_cache && (!cparams.moe_stream_enable || cparams.n_seq_max != 1)) {
+        throw std::runtime_error("--fn-decode-expert-cache requires --fn-stream-experts and one sequence");
+    }
     cparams.moe_stream_slots      = params.moe_stream_slots      == 0 ? 3 : params.moe_stream_slots;
     cparams.moe_stream_min_tokens = params.moe_stream_min_tokens == 0 ? 1 : params.moe_stream_min_tokens;
     cparams.moe_stream_pin        = params.moe_stream_pin;
@@ -496,6 +501,8 @@ llama_context::~llama_context() {
     synchronize();
 
     // the expert arena buffers are referenced by the last graph, so tear the engine down first
+    llama_moe_cache_destroy(moe_cache);
+    moe_cache = nullptr;
     llama_moe_stream_destroy(moe_stream);
     moe_stream = nullptr;
 
@@ -603,6 +610,7 @@ void llama_context::sched_reserve() {
 
     sched_need_reserve = false;
     moe_stream_need_reserve = true;
+    moe_cache_need_reserve = true;
 
     LLAMA_LOG_INFO("%s: reserving ...\n", __func__);
 
@@ -1353,7 +1361,8 @@ bool llama_context::set_adapter_cvec(
 
 const llama_moe_stream * llama_context::moe_stream_update(const int64_t n_tokens) {
     if (moe_stream == nullptr && !moe_stream_failed && cparams.moe_stream_enable
-            && n_tokens >= (int64_t) cparams.moe_stream_min_tokens) {
+            && (n_tokens >= (int64_t) cparams.moe_stream_min_tokens ||
+                (cparams.moe_decode_cache && decode_purpose != LLAMA_DECODE_AUTO))) {
         const uint32_t n_layer = model.hparams.n_layer();
 
         std::vector<ggml_backend_dev_t> dev_of_layer(n_layer, nullptr);
@@ -1382,6 +1391,16 @@ const llama_moe_stream * llama_context::moe_stream_update(const int64_t n_tokens
         }
     }
 
+    if (moe_stream && cparams.moe_decode_cache && !moe_cache && !moe_cache_failed) {
+        llama_moe_cache_params params;
+        params.enable = true;
+        moe_cache = llama_moe_cache_create(model, moe_stream, params);
+        if (!moe_cache) {
+            moe_cache_failed = true;
+            LLAMA_LOG_WARN("moe_cache: shared-pool cache unavailable; generation uses baseline experts\n");
+        }
+    }
+
     return llama_moe_stream_select(moe_stream, n_tokens);
 }
 
@@ -1392,8 +1411,59 @@ llm_graph_result * llama_context::process_ubatch(const llama_ubatch & ubatch, ll
         return nullptr;
     }
 
+    if (moe_cache || (cparams.moe_decode_cache && !moe_cache_failed && !moe_stream_failed &&
+                      decode_purpose != LLAMA_DECODE_AUTO)) {
+        ggml_backend_sched_synchronize(sched.get());
+    }
+
     // Select before graph construction. Reserve graphs may contain fences but never execute them.
     moe_stream_cur = moe_stream_update(ubatch.n_tokens);
+    moe_cache_cur = nullptr;
+    const bool cache_eligible = loras->empty();
+    moe_cache_observe = moe_cache && !moe_cache_failed && cache_eligible && decode_purpose != LLAMA_DECODE_AUTO;
+    const bool cache_prompt = decode_purpose != LLAMA_DECODE_GENERATION;
+
+    if (moe_cache && !moe_cache_failed) {
+        if (moe_cache_need_reserve && cache_eligible) {
+            ggml_backend_sched_synchronize(sched.get());
+            auto mctx_full = memory ? memory->init_full() : nullptr;
+            const auto * saved_stream = moe_stream_cur;
+            moe_stream_cur = nullptr;
+            moe_cache_cur = moe_cache;
+            bool reserved = false;
+            try {
+                const uint32_t rows = std::min<uint32_t>(49, cparams.n_ubatch);
+                reserved = (!memory || mctx_full) && graph_reserve(rows, 1,
+                        std::min(rows, cparams.n_outputs_max), mctx_full.get());
+            } catch (const std::exception & error) {
+                LLAMA_LOG_WARN("moe_cache: full-memory reservation failed: %s\n", error.what());
+            }
+            moe_cache_cur = nullptr;
+            moe_stream_cur = saved_stream;
+            moe_cache_need_reserve = false;
+            if (!reserved) {
+                moe_cache_failed = true;
+                moe_cache_observe = false;
+                llama_moe_cache_destroy(moe_cache);
+                moe_cache = nullptr;
+                moe_stream_cur = llama_moe_stream_select(moe_stream, ubatch.n_tokens);
+                LLAMA_LOG_WARN("moe_cache: full-memory graph does not fit; generation uses baseline experts\n");
+            } else {
+                LLAMA_LOG_INFO("moe_cache: full-memory generation graph reserved at n_ctx=%u, rows=%u\n",
+                               cparams.n_ctx, std::min<uint32_t>(49, cparams.n_ubatch));
+                for (size_t i = 0; i < backend_ptrs.size(); ++i) {
+                    backend_buf_exp_size[i] = ggml_backend_sched_get_buffer_size(sched.get(), backend_ptrs[i]);
+                }
+            }
+        }
+        if (!moe_cache_failed && ((cache_eligible && decode_purpose != LLAMA_DECODE_AUTO) ||
+                                  ubatch.n_tokens >= cparams.moe_stream_min_tokens)) {
+            if (llama_moe_cache_prepare(moe_cache, ubatch.n_tokens, cache_prompt) && !cache_prompt) {
+                moe_cache_cur = moe_cache;
+            }
+            moe_stream_cur = cache_prompt ? llama_moe_stream_select(moe_stream, ubatch.n_tokens) : nullptr;
+        }
+    }
 
     if (moe_stream_cur && moe_stream_need_reserve) {
         // Startup reserves the host-expert graph. Device experts change splits and tensor lifetimes.
@@ -1432,6 +1502,7 @@ llm_graph_result * llama_context::process_ubatch(const llama_ubatch & ubatch, ll
 
     // the decision now lives in gparams; leave every other graph builder on the baseline path
     moe_stream_cur = nullptr;
+    moe_cache_cur = nullptr;
 
     if (!graph_reuse_disable && res->can_reuse(gparams)) {
         //LLAMA_LOG_DEBUG("%s: reusing previous graph\n", __func__);
@@ -1492,6 +1563,25 @@ llm_graph_result * llama_context::process_ubatch(const llama_ubatch & ubatch, ll
         LLAMA_LOG_ERROR("%s: failed to compute graph, compute status: %d\n", __func__, status);
         ret = status;
         return nullptr;
+    }
+
+    if (moe_cache_observe && !moe_cache_failed) {
+        ggml_backend_sched_synchronize(sched.get());
+        std::vector<std::vector<int32_t>> routes(res->t_moe_routes.size());
+        for (size_t i = 0; i < routes.size(); ++i) {
+            auto * tensor = res->t_moe_routes[i].second;
+            routes[i].resize(ggml_nelements(tensor));
+            auto * backend = ggml_backend_sched_get_tensor_backend(sched.get(), tensor);
+            ggml_backend_tensor_get_async(backend, tensor, routes[i].data(), 0, ggml_nbytes(tensor));
+        }
+        ggml_backend_sched_synchronize(sched.get());
+        for (size_t i = 0; i < routes.size(); ++i) {
+            const auto & route = res->t_moe_routes[i];
+            auto * tensor = route.second;
+            llama_moe_cache_observe(moe_cache, route.first, routes[i].data(), tensor->ne[1],
+                                   (int) tensor->ne[0], (size_t) tensor->ne[0], cache_prompt);
+        }
+        llama_moe_cache_finish(moe_cache, ubatch.n_tokens, cache_prompt);
     }
 
     ret = GGML_STATUS_SUCCESS;
@@ -2526,7 +2616,11 @@ ggml_cgraph * llama_context::graph_reserve(
 
     // store the n_outputs as it is, and restore it afterwards
     // TODO: not sure if needed, might simplify in the future by removing this
-    const auto save_n_outputs = this->n_outputs;
+    struct outputs_guard {
+        uint32_t & value;
+        uint32_t saved;
+        ~outputs_guard() { value = saved; }
+    } restore_outputs { this->n_outputs, this->n_outputs };
 
     this->n_outputs = n_outputs;
 
@@ -2543,7 +2637,7 @@ ggml_cgraph * llama_context::graph_reserve(
 
     auto * gf = model.build_graph(gparams);
 
-    this->n_outputs = save_n_outputs;
+    this->n_outputs = restore_outputs.saved;
 
     // initialize scheduler with the specified graph
     if (split_only) {
@@ -2579,6 +2673,9 @@ llm_graph_params llama_context::graph_params(
         /*.mctx        =*/ mctx,
         /*.cross       =*/ &cross,
         /*.moe_stream  =*/ moe_stream_cur,
+        /*.moe_cache   =*/ moe_cache_cur,
+        /*.moe_cache_generation =*/ llama_moe_cache_generation(moe_cache_cur),
+        /*.moe_cache_observe =*/ moe_cache_observe,
         /*.samplers    =*/ sampling.samplers,
         /*.n_outputs   =*/ n_outputs,
         /*.cb          =*/ graph_get_cb(),
@@ -3750,6 +3847,7 @@ llama_context_params llama_context_default_params() {
         /*.n_sampler                   =*/ 0,
         /*.ctx_other                   =*/ nullptr,
         /*.moe_stream_enable           =*/ false,
+        /*.moe_decode_cache            =*/ false,
         /*.moe_stream_slots            =*/ 3,
         /*.moe_stream_min_tokens       =*/ 1024,
         /*.moe_stream_pin              =*/ 1,
@@ -4359,6 +4457,28 @@ int32_t llama_decode(
     }
 
     return ret;
+}
+
+int llama_context::decode_with_purpose(const llama_batch & batch, llama_decode_purpose purpose) {
+    struct purpose_guard {
+        llama_decode_purpose & value;
+        llama_decode_purpose saved;
+        ~purpose_guard() { value = saved; }
+    } guard { decode_purpose, decode_purpose };
+    decode_purpose = purpose;
+    return decode(batch);
+}
+
+int32_t llama_decode_with_purpose(llama_context * ctx, llama_batch batch, llama_decode_purpose purpose) {
+    if (!ctx || purpose < LLAMA_DECODE_AUTO || purpose > LLAMA_DECODE_GENERATION) {
+        return -1;
+    }
+    try {
+        return ctx->decode_with_purpose(batch, purpose);
+    } catch (const std::exception & error) {
+        LLAMA_LOG_ERROR("%s: %s\n", __func__, error.what());
+        return -3;
+    }
 }
 
 //

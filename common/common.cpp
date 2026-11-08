@@ -1749,6 +1749,7 @@ struct llama_context_params common_context_params_to_llama(const common_params &
     cparams.swa_full          = params.swa_full;
     cparams.kv_unified        = params.kv_unified;
     cparams.moe_stream_enable     = params.moe_stream;
+    cparams.moe_decode_cache      = params.moe_decode_cache;
     cparams.moe_stream_slots      = params.moe_stream_slots  < 0 ? 0 : (uint32_t) params.moe_stream_slots;
     cparams.moe_stream_min_tokens = params.moe_stream_min_tokens < 0 ? 0 : (uint32_t) params.moe_stream_min_tokens;
     cparams.moe_stream_pin        = params.moe_stream_pin    < 0 ? 0 : (uint32_t) params.moe_stream_pin;

@@ -1547,6 +1547,13 @@ static void ggml_compute_forward_mul_mat_id(
     const struct ggml_tensor * src1 = dst->src[1];
     const struct ggml_tensor * ids = dst->src[2];
 
+    const struct ggml_tensor * resident = dst->op == GGML_OP_MUL_MAT_ID_MASKED ? dst->src[3] : NULL;
+    if (dst->op == GGML_OP_MUL_MAT_ID_MASKED) {
+        GGML_ASSERT(resident);
+        GGML_ASSERT(resident->type == GGML_TYPE_I32 && ggml_is_contiguous(resident));
+        GGML_ASSERT(ggml_nelements(resident) == src0->ne[2]);
+    }
+
     GGML_TENSOR_BINARY_OP_LOCALS
 
     const int ith = params->ith;
@@ -1647,6 +1654,15 @@ static void ggml_compute_forward_mul_mat_id(
                 const int32_t i02 = *(const int32_t *) ((const char *) ids->data + iid1*ids->nb[1] + id*ids->nb[0]);
 
                 assert(i02 >= 0 && i02 < n_as);
+
+                if (resident) {
+                    const int32_t state = ((const int32_t *) resident->data)[i02];
+                    GGML_ASSERT(state >= 0);
+                    if (state > 0) {
+                        memset((char *) dst->data + id*nb1 + iid1*nb2, 0, ne0*sizeof(float));
+                        continue;
+                    }
+                }
 
                 MMID_MATRIX_ROW(i02, matrix_row_counts[i02]) = (struct mmid_row_mapping) {id, iid1};
                 matrix_row_counts[i02] += 1;
@@ -1869,6 +1885,7 @@ static void ggml_compute_forward(struct ggml_compute_params * params, struct ggm
                 GGML_ABORT("fatal error: moe_stream_fence is a CUDA-only op");
             } break;
         case GGML_OP_MUL_MAT_ID:
+        case GGML_OP_MUL_MAT_ID_MASKED:
             {
                 ggml_compute_forward_mul_mat_id(params, tensor);
             } break;
@@ -2361,6 +2378,7 @@ static int ggml_get_n_tasks(struct ggml_tensor * node, int n_threads) {
         case GGML_OP_CONCAT:
         case GGML_OP_MUL_MAT:
         case GGML_OP_MUL_MAT_ID:
+        case GGML_OP_MUL_MAT_ID_MASKED:
         case GGML_OP_OUT_PROD:
             {
                 n_tasks = n_threads;
@@ -2896,6 +2914,7 @@ struct ggml_cplan ggml_graph_plan(
                         }
                     } break;
                 case GGML_OP_MUL_MAT_ID:
+                case GGML_OP_MUL_MAT_ID_MASKED:
                     {
                         cur = 0;
                         const struct ggml_tensor * src0 = node->src[0];

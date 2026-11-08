@@ -307,8 +307,8 @@ struct common_sampler * common_sampler_init(
         }
     }
 
-    // reasoning budget sampler (skip when budget is unlimited unless a lazy grammar is active, which needs rbudget for thinking-block suppression)
-    if (!params.reasoning_budget_start.empty() && !params.reasoning_budget_end.empty() && (params.grammar_lazy || params.reasoning_budget_tokens >= 0 || params.reasoning_control)) {
+    // Track reasoning even with an unlimited budget to prevent a reasoning-only EOG.
+    if (!params.reasoning_budget_start.empty() && !params.reasoning_budget_end.empty()) {
         rbudget = common_reasoning_budget_init(
             vocab,
             {params.reasoning_budget_start},

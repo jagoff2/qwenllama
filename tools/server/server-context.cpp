@@ -3677,15 +3677,21 @@ private:
         }
 
         bool has_output = false;
+        bool has_prompt = false;
+        bool has_generation = false;
         for (int i = off; i < off + batch_view.n_tokens; ++i) {
             has_output |= batch.tokens[i].output;
+            has_prompt |= batch.tokens[i].is_prompt;
+            has_generation |= !batch.tokens[i].is_prompt;
         }
+        const auto purpose = has_prompt == has_generation ? LLAMA_DECODE_AUTO :
+                has_prompt ? LLAMA_DECODE_PROMPT : LLAMA_DECODE_GENERATION;
 
         // yield to the queue, so we can still handle metrics tasks while decoding
         // note: the sync is done here too, so that the wait is also covered by the yield
         int ret = 0;
         queue_tasks.yield_to_queue([&]() {
-            ret = llama_decode(ctx_tgt, batch_view);
+            ret = llama_decode_with_purpose(ctx_tgt, batch_view, purpose);
             if (ret == 0 && has_output) {
                 llama_synchronize(ctx_tgt);
             }

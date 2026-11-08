@@ -2848,16 +2848,19 @@ void llama_vocab::impl::load(llama_model_loader & ml, const LLM_KV & kv) {
         // ref: https://github.com/ggml-org/llama.cpp/issues/9606
         special_eog_ids.clear();
 
-        if (special_fim_pad_id != LLAMA_TOKEN_NULL && special_eog_ids.count(special_fim_pad_id) == 0) {
-            special_eog_ids.insert(special_fim_pad_id);
-        }
+        // Qwen3.8-Flash-Next uses FIM markers without ending generation.
+        if (ml.get_arch() != LLM_ARCH_QWEN4EXP) {
+            if (special_fim_pad_id != LLAMA_TOKEN_NULL && special_eog_ids.count(special_fim_pad_id) == 0) {
+                special_eog_ids.insert(special_fim_pad_id);
+            }
 
-        if (special_fim_rep_id != LLAMA_TOKEN_NULL && special_eog_ids.count(special_fim_rep_id) == 0) {
-            special_eog_ids.insert(special_fim_rep_id);
-        }
+            if (special_fim_rep_id != LLAMA_TOKEN_NULL && special_eog_ids.count(special_fim_rep_id) == 0) {
+                special_eog_ids.insert(special_fim_rep_id);
+            }
 
-        if (special_fim_sep_id != LLAMA_TOKEN_NULL && special_eog_ids.count(special_fim_sep_id) == 0) {
-            special_eog_ids.insert(special_fim_sep_id);
+            if (special_fim_sep_id != LLAMA_TOKEN_NULL && special_eog_ids.count(special_fim_sep_id) == 0) {
+                special_eog_ids.insert(special_fim_sep_id);
+            }
         }
 
         for (const auto & t : token_to_id) {

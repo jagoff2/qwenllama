@@ -5,6 +5,7 @@
 #include "llama-moe-stream.h"
 #include "../ggml/src/ggml-backend-impl.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -561,6 +562,62 @@ static void test_place_arena(void) {
     }
 }
 
+static void test_cache_layout() {
+    const uint64_t mib = uint64_t(1) << 20;
+    std::vector<cache_layer> layers;
+    for (int il = 0; il < 46; ++il) {
+        cache_layer layer;
+        layer.il = il;
+        layer.expert_bytes[0] = layer.expert_bytes[1] = il == 2 ? 1126400 : 921600;
+        layer.expert_bytes[2] = il == 2 || il == 4 || il == 30 ? 1740800 : 1228800;
+        layer.tail_bytes[2] = il == 2 || il == 4 || il == 30 ? 408 : 288;
+        layers.push_back(layer);
+    }
+    const std::vector<uint64_t> extents(2, 1950 * mib + 408);
+    const auto plan = plan_cache(layers, extents, 27, 32 * mib);
+    CHECK(plan.enabled, "27-slot cache must fit: %s", plan.reason.c_str());
+    CHECK(plan.slots_per_layer == 27 && plan.banks.size() == 46, "cache capacity must be 1242 experts");
+    CHECK(plan.bank_bytes == 4011236352ULL, "padded bank bytes=%llu", (unsigned long long) plan.bank_bytes);
+    std::vector<std::vector<cache_bank>> banks(2);
+    for (const auto & bank : plan.banks) {
+        CHECK(bank.extent >= 0 && bank.extent < 2, "invalid cache extent");
+        CHECK(bank.offset % 512 == 0 && bank.bytes % 512 == 0, "cache bank alignment");
+        CHECK(bank.offset + bank.bytes <= 1918 * mib, "cache bank must not enter scratch");
+        const auto & layer = layers[bank.il];
+        for (int f = 0; f < 3; ++f) {
+            CHECK(bank.family_offset[f] % 512 == 0, "cache family alignment");
+            CHECK(bank.family_offset[f] + 28 * layer.expert_bytes[f] + layer.tail_bytes[f] <= bank.bytes,
+                  "cache family overflow");
+        }
+        banks[bank.extent].push_back(bank);
+    }
+    for (auto & extent_banks : banks) {
+        std::sort(extent_banks.begin(), extent_banks.end(), [](const cache_bank & a, const cache_bank & b) {
+            return a.offset < b.offset;
+        });
+        for (size_t i = 1; i < extent_banks.size(); ++i) {
+            CHECK(extent_banks[i - 1].offset + extent_banks[i - 1].bytes <= extent_banks[i].offset,
+                  "cache banks overlap");
+        }
+    }
+    const auto repeat = plan_cache(layers, extents, 27, 32 * mib);
+    CHECK(repeat.extent_used == plan.extent_used, "cache packing must be deterministic");
+    CHECK(plan_cache(layers, extents, 26, 32 * mib).enabled, "26-slot fallback must fit");
+    CHECK(!plan_cache(layers, extents, 28, 32 * mib).enabled, "28 slots must exceed existing pool");
+    CHECK(!plan_cache(layers, {32 * mib}, 27, 32 * mib).enabled, "scratch cannot consume whole extent");
+    CHECK(!plan_cache(layers, extents, 0, 32 * mib).enabled, "zero cache capacity rejected");
+    CHECK(!plan_cache(layers, extents, 512, 32 * mib).enabled, "cache cannot exceed model expert count");
+    CHECK(!plan_cache(layers, extents, 27, 32 * mib, 3).enabled, "non-power-of-two alignment rejected");
+    layers[0].expert_bytes[0] = std::numeric_limits<uint64_t>::max();
+    CHECK(!plan_cache(layers, extents, 27, 32 * mib).enabled, "cache multiplication overflow rejected");
+    CHECK(!cache_admit(1, 0, true), "one-use experts must not be admitted");
+    CHECK(cache_admit(2, 0, true), "second use may fill a free slot");
+    CHECK(!cache_admit(2, 2, false), "equal popularity must not churn");
+    CHECK(!cache_admit(17, 16, false), "hysteresis must protect hot resident");
+    CHECK(cache_admit(19, 16, false), "meaningful popularity gain may replace resident");
+    CHECK(!cache_admit(UINT32_MAX, UINT32_MAX, false), "score threshold must not overflow");
+}
+
 int main(void) {
     test_rings();
     test_plan_single_device();
@@ -573,6 +630,7 @@ int main(void) {
     test_unique_experts();
     test_layout();
     test_place_arena();
+    test_cache_layout();
 
     std::printf("test-moe-stream-plan: %d checks, %d failures\n", g_checks, g_fail);
     return g_fail == 0 ? 0 : 1;

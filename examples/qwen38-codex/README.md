@@ -1,14 +1,17 @@
 # Qwen3.8 Flash-Next Codex launch snapshot
 
-These files preserve the local launch configuration used on 2026-09-19:
+These files preserve the active local launch configuration identified on 2026-11-08:
 
-- `launch-local.ps1` preserves the command from `G:\qwenllamaMTP\perf-20260911\bench\flashnext-stream-prefill\launch-best.ps1`.
-- `qwen38-codex.jinja` is an unchanged copy of the template at `G:\qwenllamaMTP\qwen38-codex.jinja` referenced by that script.
+- `launch-local.ps1` is a byte-for-byte copy of `G:\qwenllamaMTP\perf-20260911\bench\flashnext-stream-prefill\launch-best-decode-no-draft-think-guard.ps1`.
+- `qwen38-codex-system-role-demoted.jinja` is a byte-for-byte copy of the template at `G:\qwenllamaMTP\qwen38-codex-system-role-demoted.jinja` referenced by that script, including its local host instructions.
+- `qwen38-codex.jinja` retains the earlier 2026-09-19 template for reference.
 
 The launch script retains the original absolute paths. To use another checkout or machine, update the executable, model shards, projector, and chat-template paths. The model and projector weights are external assets.
 
-The launched executable is `G:\qwenllamaMTP\perf-20260911\dist\namespace-tool-20260919\bin\llama-server.exe`. SHA-256 comparison confirmed that it and all eight adjacent DLLs match `G:\qwenllamaMTP\perf-20260911-nsfix\build\bin`. That build uses base commit `271fe98d46e38d79aeb45a052e3254f8b1e758f1` plus the Responses namespace-tool and content-conversion changes committed with this snapshot. The eight changed source, test, and server documentation files matched the build checkout byte-for-byte. The later root README update is preserved separately in the history.
+The launched executable is `G:\qwenllamaMTP\perf-20260911\dist\fn-decode-cache-think-guard-20261006\bin\llama-server.exe`. SHA-256 comparison confirmed that both executables and all eight DLLs in that directory match `G:\qwenllamaMTP\perf-20260911\llama.cpp\build\bin`. The build's CMake cache points to this checkout. The 29 source files in the saved decode-cache implementation manifest match the current files; its documentation file was updated later. All five source and test postimages in the saved reasoning-guard patch also match the current files.
+
+This snapshot includes the shared expert decode cache, Qwen FIM-token end-of-generation correction, and reasoning guard that suppresses end-of-generation until visible answer or tool content follows reasoning. The launcher enables `--fn-decode-expert-cache`, disables speculative decoding, uses `--reasoning-format none`, and retains the 261888-token context, F16 KV cache, 4096-token batch and microbatch, and 4096 MiB streamed-expert budget.
 
 Build settings recorded in the local CMake cache: Release, MSVC 19.37.32822.0, CUDA 13.2, architecture `120a`, shared libraries, CUDA and Flash Attention enabled, Flash Attention quantizations `q4_0-q4_0;q8_0-q8_0;f16-f16;bf16-bf16`, NCCL disabled, and OpenSSL disabled.
 
-Validation before publication: the existing CPU `test-chat.exe` passed, and all 10 tests in `tools/server/tests/unit/test_compat_oai_responses.py` passed against the deployed executable with the local `stories260K-f32.gguf` test model and GPU layers disabled. This verification did not rerun the full Qwen model workload.
+Validation on 2026-11-08 used the existing local test binaries: `test-moe-stream-plan.exe` passed 9568 checks, `test-moe-stream-sim.exe` passed 1108 checks, and `test-reasoning-budget.exe` passed its 12 sampler tests, UTF-8 checks, and output-before-EOG guard checks with `models/ggml-vocab-qwen35.gguf`. The launcher passed PowerShell syntax parsing. This publication did not rebuild the server or rerun the full Qwen model workload; the numerical-parity limitations recorded in [the decode-cache notes](../../docs/shared-expert-decode-cache.md) remain applicable.

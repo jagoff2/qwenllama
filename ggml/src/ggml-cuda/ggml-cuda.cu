@@ -1670,6 +1670,10 @@ static bool ggml_cuda_should_fuse_mul_mat(const ggml_tensor * ffn_up,
                                           const ggml_tensor * ffn_gate_bias = nullptr,
                                           const ggml_tensor * ffn_up_scale = nullptr,
                                           const ggml_tensor * ffn_gate_scale = nullptr) {
+    // Cache nodes use explicit bounded scratch and must retain their dispatch identity.
+    if (strncmp(ffn_up->name, "fn_cache_gpu_", 13) == 0 || strncmp(ffn_gate->name, "fn_cache_gpu_", 13) == 0) {
+        return false;
+    }
     const bool has_bias = ffn_up_bias != nullptr || ffn_gate_bias != nullptr;
     const bool has_scale = ffn_up_scale != nullptr || ffn_gate_scale != nullptr;
 
@@ -1913,6 +1917,13 @@ static void ggml_cuda_mul_mat_id(ggml_backend_cuda_context & ctx, ggml_tensor * 
     const int cc = ggml_cuda_info().devices[ggml_cuda_get_device()].cc;
 
     // [TAG_MUL_MAT_ID_CUDA_GRAPHS]
+    if (strncmp(dst->name, "fn_cache_gpu_", 13) == 0) {
+        const bool cache_quant = src0->type == GGML_TYPE_Q4_K || src0->type == GGML_TYPE_Q5_1 ||
+                                 src0->type == GGML_TYPE_Q5_K || src0->type == GGML_TYPE_Q8_0;
+        GGML_ASSERT(cache_quant && ne2 <= 8 && ne2 <= get_mmvq_mmid_max_batch(src0->type, cc));
+        ggml_cuda_mul_mat_vec_q(ctx, src0, src1, ids, dst);
+        return;
+    }
     if (src1->type == GGML_TYPE_F32 && dst->type == GGML_TYPE_F32) {
         static_assert(MMVQ_MAX_BATCH_SIZE == MMVF_MAX_BATCH_SIZE);
         if (ne2 <= MMVQ_MAX_BATCH_SIZE) {
@@ -5122,6 +5133,8 @@ static bool ggml_backend_cuda_device_supports_op(ggml_backend_dev_t dev, const g
                     return false;
             }
             break;
+        case GGML_OP_MUL_MAT_ID_MASKED:
+            return false;
         case GGML_OP_MOE_STREAM_FENCE:
             {
                 // ordering point for the streamed expert arena. it moves no data but it must execute on
@@ -5144,6 +5157,18 @@ static bool ggml_backend_cuda_device_supports_op(ggml_backend_dev_t dev, const g
                 }
                 if (b->type == GGML_TYPE_F16 && a->type != GGML_TYPE_F16) {
                     return false;
+                }
+                if (op->op == GGML_OP_MUL_MAT_ID && strncmp(op->name, "fn_cache_gpu_", 13) == 0) {
+                    // Cache tiles force MMVQ to support duplicate dummy expert IDs.
+                    // Reject unsupported devices before graph allocation, rather
+                    // than accepting an MMQ fallback that the execution path forbids.
+                    const bool cache_quant = a->type == GGML_TYPE_Q4_K || a->type == GGML_TYPE_Q5_1 ||
+                                             a->type == GGML_TYPE_Q5_K || a->type == GGML_TYPE_Q8_0;
+                    const int cache_cc = ggml_cuda_info().devices[dev_ctx->device].cc;
+                    return cache_quant && b->type == GGML_TYPE_F32 && op->type == GGML_TYPE_F32 &&
+                           op->src[2] && op->src[2]->type == GGML_TYPE_I32 &&
+                           op->ne[2] >= 1 && op->ne[2] <= 8 &&
+                           op->ne[2] <= get_mmvq_mmid_max_batch(a->type, cache_cc);
                 }
 #ifdef GGML_USE_MUSA
                 const int cc = ggml_cuda_info().devices[dev_ctx->device].cc;
@@ -5726,6 +5751,21 @@ static void * ggml_backend_cuda_reg_get_proc_address(ggml_backend_reg_t reg, con
     }
     if (strcmp(name, GGML_MOE_STREAM_PROC_BEGIN) == 0) {
         return (void *)ggml_cuda_moe_stream_begin_impl;
+    }
+    if (strcmp(name, GGML_MOE_STREAM_PROC_MODE) == 0) {
+        return (void *)ggml_cuda_moe_stream_mode_impl;
+    }
+    if (strcmp(name, GGML_MOE_STREAM_PROC_COPY) == 0) {
+        return (void *)ggml_cuda_moe_cache_copy_impl;
+    }
+    if (strcmp(name, GGML_MOE_STREAM_PROC_QUERY) == 0) {
+        return (void *)ggml_cuda_moe_cache_query_impl;
+    }
+    if (strcmp(name, GGML_MOE_STREAM_PROC_DRAIN) == 0) {
+        return (void *)ggml_cuda_moe_cache_drain_impl;
+    }
+    if (strcmp(name, GGML_MOE_STREAM_PROC_SCRATCH) == 0) {
+        return (void *)ggml_cuda_moe_cache_scratch_impl;
     }
     return nullptr;
 }

@@ -56,6 +56,7 @@ struct llama_cparams {
 
     // streamed MoE expert weights (see llama_context_params)
     bool     moe_stream_enable     = false;
+    bool     moe_decode_cache      = false;
     uint32_t moe_stream_slots      = 3;
     uint32_t moe_stream_min_tokens = 1024;
     uint32_t moe_stream_pin        = 1;

@@ -1,20 +1,20 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 
 $env:QWEN4EXP_QSA_GATHER = '1'
 $env:QWEN4EXP_QSA_QUERY_CHUNK = '256'
 $env:LLAMA_ATTN_ROT_DISABLE = '1'
-$env:LLAMA_MTP_UBATCH = '128'
+$env:LLAMA_ARG_SPEC_TYPE = 'none'
 
 $serverArgs = @(
     '-m',
-    'C:\Users\user\.cache\huggingface\hub\models--unsloth--Qwen3.8-Flash-Next-GGUF\snapshots\38bb39ee97821de2c9009abb7e93950eec396e66\UD-Q4_K_XL\Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf',
+    'C:\Users\user\Downloads\Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf',
 
     '--mmproj',
     'G:\qwenllamaMTP\perf-20260911\assets\Qwen3.8-Flash-Next\mmproj-F16.gguf',
 
     '--no-mmproj-offload',
 
-	'--spec-type', 'ngram-map-k',
+	'--spec-type', 'none',
 
     '--jinja',
 
@@ -23,7 +23,7 @@ $serverArgs = @(
 
     '-fitc',
     '261888',
-
+	
 	'-v',
 
     '-sm',
@@ -44,7 +44,7 @@ $serverArgs = @(
 
     '-np',
     '1',
-
+	
 	'--no-kv-unified',
 
     '--samplers',
@@ -74,17 +74,14 @@ $serverArgs = @(
     '--reasoning',
     'on',
 
-    '--reasoning-effort',
-    'xhigh',
-
     '--reasoning-budget',
     '-1',
 
-	'--reasoning-format', 'deepseek',
-	'--no-reasoning-preserve',
+	'--reasoning-format', 'none',
+
 
     '--chat-template-file',
-    'G:\qwenllamaMTP\qwen38-codex.jinja',
+    'G:\qwenllamaMTP\qwen38-codex-system-role-demoted.jinja',
 
     '--metrics',
 
@@ -120,6 +117,7 @@ $serverArgs = @(
     'off',
 
     '--fn-stream-experts',
+    '--fn-decode-expert-cache',
 
     # Proven double-buffer configuration.
     '--fn-stream-slots',
@@ -142,4 +140,6 @@ $serverArgs = @(
     '127.0.0.1'
 )
 
-& 'G:\qwenllamaMTP\perf-20260911\dist\namespace-tool-20260919\bin\llama-server.exe' @serverArgs
+& 'G:\qwenllamaMTP\perf-20260911\dist\fn-decode-cache-think-guard-20261006\bin\llama-server.exe' @serverArgs
+
+

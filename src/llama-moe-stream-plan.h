@@ -110,6 +110,36 @@ std::vector<int> place_arena(const std::vector<int> & layer_dev,
 // the streamed image is the whole layer, so this is diagnostic, not a traffic model.
 double expected_unique_experts(int64_t n_expert, int64_t k, int64_t n_tokens);
 
+struct cache_layer {
+    int il = -1;
+    uint64_t expert_bytes[3] = { 0, 0, 0 };
+    uint64_t tail_bytes[3] = { 0, 0, 0 };
+};
+
+struct cache_bank {
+    int il = -1;
+    int extent = -1;
+    uint64_t offset = 0;
+    uint64_t bytes = 0;
+    uint64_t family_offset[3] = { 0, 0, 0 };
+};
+
+struct cache_plan {
+    bool enabled = false;
+    int slots_per_layer = 0;
+    uint64_t bank_bytes = 0;
+    std::vector<cache_bank> banks;
+    std::vector<uint64_t> extent_used;
+    std::string reason;
+};
+
+// Includes one permanent zero slot per layer. Scratch is carved from each extent's payload.
+cache_plan plan_cache(const std::vector<cache_layer> & layers, const std::vector<uint64_t> & extents,
+                      int slots_per_layer, uint64_t scratch_per_extent, uint64_t alignment = 512);
+
+// Admission uses integer scores so ties and decay are reproducible across backends.
+bool cache_admit(uint32_t candidate, uint32_t victim, bool free_slot);
+
 } // namespace llama_moe_plan
 
 #endif // LLAMA_MOE_STREAM_PLAN_H

@@ -65,6 +65,7 @@ struct common_reasoning_budget_ctx {
     size_t force_pos;         // next position in forced_tokens to force
 
     int32_t end_match;        // index into end_matcher.seqs of the sequence that transitioned to DONE, -1 if none
+    bool awaiting_output;
 };
 
 static const char * common_reasoning_budget_name(const struct llama_sampler * /*smpl*/) {
@@ -97,6 +98,7 @@ static void common_reasoning_budget_accept(struct llama_sampler * smpl, llama_to
             if (match >= 0) {
                 ctx->state = REASONING_BUDGET_DONE;
                 ctx->end_match = match;
+                ctx->awaiting_output = true;
                 COM_TRC("%s", "deactivated (natural end)\n");
                 break;
             }
@@ -139,6 +141,7 @@ static void common_reasoning_budget_accept(struct llama_sampler * smpl, llama_to
             if (ctx->force_pos >= ctx->forced_tokens.size()) {
                 ctx->state = REASONING_BUDGET_DONE;
                 ctx->end_match = match;
+                ctx->awaiting_output = true;
                 COM_TRC("%s", "forced sequence complete, done\n");
             }
             break;
@@ -151,12 +154,18 @@ static void common_reasoning_budget_accept(struct llama_sampler * smpl, llama_to
                 ctx->remaining = ctx->budget;
                 ctx->end_matcher.reset();
                 ctx->end_match = -1;
+                ctx->awaiting_output = false;
                 COM_TRC("re-activated on new start tag, budget=%d tokens\n", ctx->budget);
 
                 if (ctx->remaining <= 0) {
                     ctx->state = REASONING_BUDGET_FORCING;
                     ctx->force_pos = 0;
                     COM_TRC("%s", "budget=0, forcing immediately\n");
+                }
+            } else if (ctx->awaiting_output && ctx->vocab && !llama_vocab_is_eog(ctx->vocab, token)) {
+                const std::string piece = common_token_to_piece(ctx->vocab, token, false);
+                if (piece.find_first_not_of(" \t\n\r\f\v") != std::string::npos) {
+                    ctx->awaiting_output = false;
                 }
             }
             break;
@@ -165,6 +174,17 @@ static void common_reasoning_budget_accept(struct llama_sampler * smpl, llama_to
 
 static void common_reasoning_budget_apply(struct llama_sampler * smpl, llama_token_data_array * cur_p) {
     auto * ctx = (common_reasoning_budget_ctx *) smpl->ctx;
+
+    if (ctx->state == REASONING_BUDGET_DONE && ctx->awaiting_output && ctx->vocab) {
+        // Require answer or tool content after reasoning, allowing leading whitespace.
+        for (size_t i = 0; i < cur_p->size; i++) {
+            if (llama_vocab_is_eog(ctx->vocab, cur_p->data[i].id)) {
+                cur_p->data[i].logit = -INFINITY;
+            }
+        }
+        cur_p->sorted = false;
+        return;
+    }
 
     if (ctx->state != REASONING_BUDGET_FORCING) {
         // passthrough — don't modify logits
@@ -193,6 +213,7 @@ static void common_reasoning_budget_reset(struct llama_sampler * smpl) {
     ctx->end_matcher.reset();
     ctx->force_pos = 0;
     ctx->end_match = -1;
+    ctx->awaiting_output = false;
 }
 
 static struct llama_sampler * common_reasoning_budget_init_state(
@@ -254,6 +275,7 @@ static struct llama_sampler * common_reasoning_budget_init_state(
             /* .state         = */ initial_state,
             /* .force_pos     = */ 0,
             /* .end_match     = */ -1,
+            /* .awaiting_output = */ false,
         }
     );
 }

@@ -434,12 +434,19 @@ static bool ggml_backend_cpu_device_supports_op(ggml_backend_dev_t dev, const st
     for (int i = 0; i < 4; i++) {
         if (op->src[i] && op->src[i]->buffer &&
             ggml_backend_cpu_is_extra_buffer_type(op->src[i]->buffer->buft)) {
+            if (op->op == GGML_OP_MUL_MAT_ID_MASKED) {
+                return false;
+            }
             auto * buf_extra = (ggml::cpu::extra_buffer_type *) op->src[i]->buffer->buft->context;
             return buf_extra->supports_op(dev, op);
         }
     }
 
     switch (op->op) {
+        case GGML_OP_MUL_MAT_ID_MASKED:
+            return src1->type == GGML_TYPE_F32 && op->src[3] &&
+                op->src[3]->type == GGML_TYPE_I32 && ggml_is_contiguous(op->src[3]) &&
+                ggml_nelements(op->src[3]) == src0->ne[2];
         case GGML_OP_CPY:
         case GGML_OP_SET_ROWS:
             return

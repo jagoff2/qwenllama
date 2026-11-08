@@ -358,7 +358,110 @@ static void test_utf8_boundary_detection() {
     GGML_ASSERT(common_utf8_is_complete(std::string("hello\xC3\xA9", 7)));    // ASCII + complete 2-byte
 }
 
-int main(void) {
+static void test_reasoning_budget_output_before_eog(const char * vocab_path) {
+    auto params = llama_model_default_params();
+    params.vocab_only = true;
+    llama_model * model = llama_model_load_from_file(vocab_path, params);
+    GGML_ASSERT(model != nullptr);
+    const llama_vocab * vocab = llama_model_get_vocab(model);
+
+    const auto start = common_tokenize(vocab, "<think>", false, true);
+    const auto end = common_tokenize(vocab, "</think>", false, true);
+    const auto tool = common_tokenize(vocab, "<tool_call>", false, true);
+    const auto forced = common_tokenize(vocab, "</think>\n\n", false, true);
+    const auto answer = common_tokenize(vocab, "Hello", false, true);
+    GGML_ASSERT(!start.empty() && !end.empty() && !tool.empty() && !answer.empty());
+
+    std::vector<llama_token_data> candidates;
+    for (llama_token token = 0; token < llama_vocab_n_tokens(vocab); ++token) {
+        if (llama_vocab_is_eog(vocab, token)) {
+            candidates.push_back({token, 2.0f, 0.0f});
+        }
+    }
+    GGML_ASSERT(candidates.size() >= 2 && "fixture must cover multiple EOG tokens");
+    GGML_ASSERT(!llama_vocab_is_eog(vocab, answer.front()));
+    candidates.push_back({answer.front(), 1.0f, 0.0f});
+
+    int checkpoint = 0;
+    auto check_guard = [&](llama_sampler * sampler, bool guarded) {
+        ++checkpoint;
+        for (auto & candidate : candidates) {
+            candidate.logit = llama_vocab_is_eog(vocab, candidate.id) ? 2.0f : 1.0f;
+        }
+        llama_token_data_array cur = { candidates.data(), candidates.size(), -1, true };
+        llama_sampler_apply(sampler, &cur);
+        for (const auto & candidate : candidates) {
+            const bool eog = llama_vocab_is_eog(vocab, candidate.id);
+            const float expected = guarded && eog ? -INFINITY : eog ? 2.0f : 1.0f;
+            if (candidate.logit != expected) {
+                fprintf(stderr, "EOG guard checkpoint %d: token=%d logit=%f expected=%f\n",
+                        checkpoint, candidate.id, candidate.logit, expected);
+                GGML_ASSERT(false);
+            }
+        }
+        if (guarded) {
+            GGML_ASSERT(!cur.sorted);
+        }
+    };
+    auto accept_text = [&](llama_sampler * sampler, const std::string & text) {
+        for (const auto token : common_tokenize(vocab, text, false, true)) {
+            llama_sampler_accept(sampler, token);
+        }
+    };
+
+    auto * sampler = common_reasoning_budget_init(vocab, {start}, {end, tool}, forced, 100);
+    check_guard(sampler, false);
+    accept_text(sampler, "An ordinary answer.");
+    check_guard(sampler, false);
+    accept_text(sampler, "<think>Let me read the manifest.");
+    check_guard(sampler, false);
+    accept_text(sampler, "</think>");
+    check_guard(sampler, true);
+    for (const auto token : common_tokenize(vocab, "\n\n \t\r\n", false, true)) {
+        llama_sampler_accept(sampler, token);
+        check_guard(sampler, true);
+    }
+    accept_text(sampler, "<|im_start|>");
+    check_guard(sampler, true);
+
+    auto * clone = llama_sampler_clone(sampler);
+    check_guard(clone, true);
+    accept_text(clone, "Hello");
+    check_guard(clone, false);
+    check_guard(sampler, true);
+    llama_sampler_free(clone);
+
+    accept_text(sampler, "<tool_call>\n<function=read_file>");
+    check_guard(sampler, false);
+    llama_sampler_reset(sampler);
+    check_guard(sampler, false);
+    accept_text(sampler, "<think>");
+    accept_text(sampler, "Again.");
+    accept_text(sampler, "</think>");
+    check_guard(sampler, true);
+    accept_text(sampler, "<think>");
+    check_guard(sampler, false);
+    accept_text(sampler, "<tool_call>\n<function=read_file>");
+    check_guard(sampler, false);
+    llama_sampler_free(sampler);
+
+    sampler = common_reasoning_budget_init(vocab, {start}, {end, tool}, forced, 0,
+                                           REASONING_BUDGET_COUNTING);
+    for (const auto token : forced) {
+        GGML_ASSERT(get_forced_token(sampler, llama_vocab_n_tokens(vocab) - 1) == token);
+        llama_sampler_accept(sampler, token);
+    }
+    check_guard(sampler, true);
+    accept_text(sampler, "\n\n");
+    check_guard(sampler, true);
+    llama_sampler_reset(sampler);
+    check_guard(sampler, false);
+    llama_sampler_free(sampler);
+    llama_model_free(model);
+    printf("Output-before-EOG guard tests passed\n");
+}
+
+int main(int argc, char ** argv) {
     // Reasoning budget sampler tests
     printf("Testing reasoning budget sampler... ");
 
@@ -500,6 +603,10 @@ int main(void) {
     printf("Testing UTF-8 boundary detection... ");
     test_utf8_boundary_detection();
     printf("OK\n");
+
+    if (argc > 1) {
+        test_reasoning_budget_output_before_eog(argv[1]);
+    }
 
     return 0;
 }

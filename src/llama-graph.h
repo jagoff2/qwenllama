@@ -94,6 +94,7 @@ struct llama_cross {
 
 struct llm_graph_params;
 struct llama_moe_stream;
+struct llama_moe_cache;
 
 //
 // llm_graph_input
@@ -790,6 +791,9 @@ struct llm_graph_params {
 
     // streamed MoE expert weights for this micro-batch; nullptr builds the baseline graph
     const llama_moe_stream       * moe_stream;
+    llama_moe_cache             * moe_cache;
+    uint64_t                      moe_cache_generation;
+    bool                          moe_cache_observe;
 
     std::map<llama_seq_id, llama_sampler *> samplers;
 
@@ -887,7 +891,10 @@ struct llm_graph_params {
             cross == other.cross &&
             // a streamed graph contains fence nodes that order the async expert fills: it is not
             // interchangeable with the baseline graph for the same ubatch shape
-            moe_stream == other.moe_stream;
+            moe_stream == other.moe_stream &&
+            moe_cache == other.moe_cache &&
+            moe_cache_generation == other.moe_cache_generation &&
+            moe_cache_observe == other.moe_cache_observe;
     }
 };
 
@@ -945,6 +952,7 @@ public:
     ggml_tensor * t_h_nextn     = nullptr; // [n_embd, n_outputs] hidden state before final output norm
 
     std::vector<ggml_tensor *> t_layer_inp;
+    std::vector<std::pair<int, ggml_tensor *>> t_moe_routes;
 
     std::vector<ggml_tensor *> t_sampled;
     std::vector<ggml_tensor *> t_sampled_probs;
@@ -1036,6 +1044,8 @@ struct llm_graph_context {
 
     // streamed MoE expert weights for this micro-batch; nullptr builds the baseline graph
     const llama_moe_stream       * moe_stream;
+    llama_moe_cache             * moe_cache;
+    bool                          moe_cache_observe;
 
     std::map<llama_seq_id, llama_sampler *> samplers;
 

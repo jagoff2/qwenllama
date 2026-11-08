@@ -19,7 +19,13 @@ void ggml_cuda_op_moe_stream_fence(ggml_backend_cuda_context & ctx, ggml_tensor 
 int  ggml_cuda_moe_stream_setup_impl(const struct ggml_cuda_moe_stream_params * params,
                                      const struct ggml_cuda_moe_stream_layer  * layers, int n_layers,
                                      const struct ggml_cuda_moe_stream_slot   * slots,  int n_slots);
-void ggml_cuda_moe_stream_teardown_impl(int device);
+void ggml_cuda_moe_stream_teardown_impl(int device, uint64_t owner);
+int ggml_cuda_moe_stream_mode_impl(int device, uint64_t owner, int mode);
+int ggml_cuda_moe_cache_copy_impl(int device, uint64_t owner, const ggml_cuda_moe_cache_copy * copy);
+int ggml_cuda_moe_cache_query_impl(int device, uint64_t owner, uint64_t tag, int wait);
+int ggml_cuda_moe_cache_drain_impl(int device, uint64_t owner);
+int ggml_cuda_moe_cache_scratch_impl(int device, uint64_t owner, void * base, size_t bytes);
+void * ggml_cuda_moe_cache_scratch(int device, size_t bytes);
 void ggml_cuda_moe_stream_stats_impl(int device, struct ggml_cuda_moe_stream_stats * out);
 void ggml_cuda_moe_stream_reset_impl(int device);
 int  ggml_cuda_moe_stream_active_impl(int device);

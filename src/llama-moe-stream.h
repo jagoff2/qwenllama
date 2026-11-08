@@ -59,6 +59,13 @@ struct llama_moe_stream_layer_bind {
     int64_t nbytes     = 0;
 };
 
+struct llama_moe_stream_extent {
+    int device;
+    void * base;
+    size_t usable_bytes;
+    ggml_backend_buffer_t buffer;
+};
+
 struct llama_moe_stream {
     bool     enabled  = false;
     bool     armed    = false;   // a graph currently refers to the ring for this micro-batch
@@ -75,6 +82,9 @@ struct llama_moe_stream {
     // ownership: the descriptor context and the arena buffers must outlive every graph that uses them
     ggml_context *          ctx_arena = nullptr;
     std::vector<ggml_backend_buffer_t> slot_buf;
+    std::vector<llama_moe_stream_extent> extents;
+    uint64_t owner = 0;
+    bool cache_mode = false;
 
     // One engine, and therefore one ring, per CUDA device that owns arena slots: with -sm layer, with
     // --fn-stream-gpu-mode primary, or with a weighted split, the streamed layers span more than one
@@ -88,7 +98,12 @@ struct llama_moe_stream {
     // engine entry points (nullptr when the CUDA backend did not provide them)
     int  (* proc_setup)(const struct ggml_cuda_moe_stream_params *, const struct ggml_cuda_moe_stream_layer *, int,
                         const struct ggml_cuda_moe_stream_slot *, int)   = nullptr;
-    void (* proc_teardown)(int)      = nullptr;
+    ggml_cuda_moe_stream_teardown_t proc_teardown = nullptr;
+    ggml_cuda_moe_stream_mode_t proc_mode = nullptr;
+    ggml_cuda_moe_cache_copy_t proc_copy = nullptr;
+    ggml_cuda_moe_cache_query_t proc_query = nullptr;
+    ggml_cuda_moe_cache_drain_t proc_drain = nullptr;
+    ggml_cuda_moe_cache_scratch_t proc_scratch = nullptr;
     void (* proc_stats)(int, struct ggml_cuda_moe_stream_stats *) = nullptr;
     void (* proc_reset)(int)         = nullptr;
     void (* proc_begin)(int, const int32_t *, const int32_t *, int) = nullptr;
@@ -124,5 +139,13 @@ void llama_moe_stream_arm(llama_moe_stream * ms, int64_t n_tokens);
 
 // Print aggregated telemetry for the micro-batch that just finished.
 void llama_moe_stream_report(llama_moe_stream * ms, int64_t n_tokens, double t_ms);
+
+// Phase changes require the caller to synchronize scheduler readers first.
+bool llama_moe_stream_enter_cache(llama_moe_stream * ms);
+bool llama_moe_stream_leave_cache(llama_moe_stream * ms);
+bool llama_moe_stream_cache_submit(llama_moe_stream * ms, int device, const ggml_cuda_moe_cache_copy & copy);
+int llama_moe_stream_cache_query(llama_moe_stream * ms, int device, uint64_t tag, bool wait = false);
+bool llama_moe_stream_cache_drain(llama_moe_stream * ms);
+bool llama_moe_stream_cache_set_scratch(llama_moe_stream * ms, int device, void * base, size_t bytes);
 
 #endif // LLAMA_MOE_STREAM_H

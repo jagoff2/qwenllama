@@ -1735,6 +1735,15 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
         }
     ).set_env("LLAMA_ARG_QWEN4EXP_STREAM").set_examples({LLAMA_EXAMPLE_SERVER, LLAMA_EXAMPLE_PERPLEXITY, LLAMA_EXAMPLE_BENCH}));
     add_opt(common_arg(
+        {"--fn-decode-expert-cache"},
+        {"--no-fn-decode-expert-cache"},
+        "reuse the streamed expert buffers for generation: cached experts on CUDA, misses on CPU\n"
+        "(requires --fn-stream-experts, default: disabled)",
+        [](common_params & params, bool value) {
+            params.moe_decode_cache = value;
+        }
+    ).set_env("LLAMA_ARG_FN_DECODE_EXPERT_CACHE").set_examples({LLAMA_EXAMPLE_SERVER}));
+    add_opt(common_arg(
         {"--fn-stream-slots"}, "N",
         string_format("expert arena slots per GPU, >= 2 overlaps the host->device fill with compute\n"
             "(default: %d)", params.moe_stream_slots),

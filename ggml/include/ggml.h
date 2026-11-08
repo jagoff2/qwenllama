@@ -605,6 +605,8 @@ extern "C" {
         // arena. Carries no data; see ggml-moe-stream.h for the engine contract.
         GGML_OP_MOE_STREAM_FENCE,
 
+        GGML_OP_MUL_MAT_ID_MASKED,
+
         GGML_OP_COUNT,
     };
 
@@ -1521,6 +1523,15 @@ extern "C" {
             struct ggml_tensor  * as,
             struct ggml_tensor  * b,
             struct ggml_tensor  * ids);
+
+    // CPU-only MMID. resident_table is contiguous I32 with one entry per expert:
+    // zero computes the host expert; positive entries produce exact zero rows.
+    GGML_API struct ggml_tensor * ggml_mul_mat_id_cpu_masked(
+            struct ggml_context * ctx,
+            struct ggml_tensor  * as,
+            struct ggml_tensor  * b,
+            struct ggml_tensor  * ids,
+            struct ggml_tensor  * resident_table);
 
     // A: m columns, n rows,
     // B: p columns, n rows,

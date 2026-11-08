@@ -7,6 +7,90 @@
 
 namespace llama_moe_plan {
 
+cache_plan plan_cache(const std::vector<cache_layer> & layers, const std::vector<uint64_t> & extents,
+                      int slots_per_layer, uint64_t scratch_per_extent, uint64_t alignment) {
+    cache_plan out;
+    if (layers.empty() || extents.empty() || slots_per_layer < 1 || slots_per_layer > 511 ||
+        alignment == 0 || (alignment & (alignment - 1))) {
+        out.reason = "invalid cache geometry";
+        return out;
+    }
+    const uint64_t limit = std::numeric_limits<uint64_t>::max();
+    const uint64_t slots = uint64_t(slots_per_layer) + 1;
+    std::vector<uint64_t> capacity;
+    for (uint64_t bytes : extents) {
+        if (bytes <= scratch_per_extent) {
+            out.reason = "cache scratch exceeds extent";
+            return out;
+        }
+        capacity.push_back((bytes - scratch_per_extent) & ~(alignment - 1));
+    }
+    for (const auto & layer : layers) {
+        cache_bank bank;
+        bank.il = layer.il;
+        for (int f = 0; f < 3; ++f) {
+            if (!layer.expert_bytes[f] || layer.tail_bytes[f] > limit - alignment ||
+                layer.expert_bytes[f] > (limit - layer.tail_bytes[f] - alignment) / slots ||
+                bank.bytes > limit - alignment) {
+                out.reason = "cache bank size overflow";
+                return out;
+            }
+            bank.bytes = (bank.bytes + alignment - 1) & ~(alignment - 1);
+            bank.family_offset[f] = bank.bytes;
+            const uint64_t bytes = slots * layer.expert_bytes[f] + layer.tail_bytes[f];
+            if (bytes > limit - bank.bytes) {
+                out.reason = "cache bank size overflow";
+                return out;
+            }
+            bank.bytes += bytes;
+        }
+        if (bank.bytes > limit - alignment) {
+            out.reason = "cache bank alignment overflow";
+            return out;
+        }
+        bank.bytes = (bank.bytes + alignment - 1) & ~(alignment - 1);
+        out.banks.push_back(bank);
+    }
+    std::stable_sort(out.banks.begin(), out.banks.end(), [](const cache_bank & a, const cache_bank & b) {
+        return a.bytes != b.bytes ? a.bytes > b.bytes : a.il < b.il;
+    });
+    out.extent_used.assign(extents.size(), 0);
+    for (auto & bank : out.banks) {
+        int best = -1;
+        uint64_t remaining = 0;
+        for (size_t i = 0; i < capacity.size(); ++i) {
+            const uint64_t available = capacity[i] - out.extent_used[i];
+            if (available >= bank.bytes && (best < 0 || available > remaining)) {
+                best = int(i);
+                remaining = available;
+            }
+        }
+        if (best < 0 || out.bank_bytes > limit - bank.bytes) {
+            out.reason = "cache banks do not fit existing extents";
+            out.banks.clear();
+            return out;
+        }
+        bank.extent = best;
+        bank.offset = out.extent_used[best];
+        out.extent_used[best] += bank.bytes;
+        out.bank_bytes += bank.bytes;
+    }
+    std::sort(out.banks.begin(), out.banks.end(), [](const cache_bank & a, const cache_bank & b) {
+        return a.il < b.il;
+    });
+    out.slots_per_layer = slots_per_layer;
+    out.enabled = true;
+    return out;
+}
+
+bool cache_admit(uint32_t candidate, uint32_t victim, bool free_slot) {
+    if (candidate < 2) {
+        return false;
+    }
+    const uint64_t threshold = uint64_t(victim) + std::max(uint32_t(1), victim / 8);
+    return free_slot || uint64_t(candidate) > threshold;
+}
+
 const char * source_rejection(const source_traits & s, int max_devices) {
     if (!s.gate_input)                 { return "missing_gate_input"; }
     if (s.fused_gate_up)               { return "unsupported_fused_gate_up"; }

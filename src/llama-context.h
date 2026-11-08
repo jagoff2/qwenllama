@@ -26,6 +26,7 @@ struct llama_memory_context_i;
 
 // streamed MoE expert weights
 struct llama_moe_stream;
+struct llama_moe_cache;
 
 // stores copy of the memory in device buffer. used for fast state save/load
 struct llama_memory_buffer {
@@ -59,6 +60,8 @@ struct llama_context {
     void sched_reserve();
 
     void synchronize();
+
+    int decode_with_purpose(const llama_batch & batch, llama_decode_purpose purpose);
 
     const llama_model   & get_model()   const;
     const llama_cparams & get_cparams() const;
@@ -359,6 +362,12 @@ private:
     bool               moe_stream_need_reserve = true;
 
     const llama_moe_stream * moe_stream_cur = nullptr;
+    llama_moe_cache * moe_cache = nullptr;
+    llama_moe_cache * moe_cache_cur = nullptr;
+    bool moe_cache_failed = false;
+    bool moe_cache_need_reserve = true;
+    bool moe_cache_observe = false;
+    llama_decode_purpose decode_purpose = LLAMA_DECODE_AUTO;
 
     ggml_backend_t backend_cpu = nullptr;
     std::vector<ggml_backend_ptr> backends;

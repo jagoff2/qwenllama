@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cinttypes>
 #include <cstdlib>
 #include <cstring>
@@ -136,7 +137,12 @@ llama_moe_stream * llama_moe_stream_create(const llama_model & model,
     void * v_stats    = proc(devs[0].reg, GGML_MOE_STREAM_PROC_STATS);
     void * v_reset    = proc(devs[0].reg, GGML_MOE_STREAM_PROC_RESET);
     void * v_begin    = proc(devs[0].reg, GGML_MOE_STREAM_PROC_BEGIN);
-    if (!v_teardown || !v_begin || !v_stats || !v_reset) {
+    void * v_mode     = proc(devs[0].reg, GGML_MOE_STREAM_PROC_MODE);
+    void * v_copy     = proc(devs[0].reg, GGML_MOE_STREAM_PROC_COPY);
+    void * v_query    = proc(devs[0].reg, GGML_MOE_STREAM_PROC_QUERY);
+    void * v_drain    = proc(devs[0].reg, GGML_MOE_STREAM_PROC_DRAIN);
+    void * v_scratch  = proc(devs[0].reg, GGML_MOE_STREAM_PROC_SCRATCH);
+    if (!v_teardown || !v_begin || !v_stats || !v_reset || !v_mode || !v_copy || !v_query || !v_drain || !v_scratch) {
         LLAMA_LOG_WARN("%s: CUDA entry points present: teardown=%d begin=%d stats=%d reset=%d; streaming disabled\n",
                        __func__, v_teardown != nullptr, v_begin != nullptr, v_stats != nullptr, v_reset != nullptr);
         return nullptr;
@@ -276,12 +282,19 @@ llama_moe_stream * llama_moe_stream_create(const llama_model & model,
     }
 
     llama_moe_stream * ms = new llama_moe_stream();
+    static std::atomic<uint64_t> next_owner{1};
+    ms->owner = next_owner.fetch_add(1);
     ms->min_tokens = params.min_tokens;
     ms->proc_setup    = (decltype(ms->proc_setup)) v_setup;
     ms->proc_teardown = (decltype(ms->proc_teardown)) v_teardown;
     ms->proc_stats    = (decltype(ms->proc_stats)) v_stats;
     ms->proc_reset    = (decltype(ms->proc_reset)) v_reset;
     ms->proc_begin    = (decltype(ms->proc_begin)) v_begin;
+    ms->proc_mode     = (decltype(ms->proc_mode)) v_mode;
+    ms->proc_copy     = (decltype(ms->proc_copy)) v_copy;
+    ms->proc_query    = (decltype(ms->proc_query)) v_query;
+    ms->proc_drain    = (decltype(ms->proc_drain)) v_drain;
+    ms->proc_scratch  = (decltype(ms->proc_scratch)) v_scratch;
 
     // size the ring against the smallest free VRAM across the devices that own streamed layers,
     // so the arena cannot be the reason an allocation fails later
@@ -391,6 +404,7 @@ llama_moe_stream * llama_moe_stream_create(const llama_model & model,
             ms->slot_buf.push_back(buf);
             dev_bufs.push_back(buf);
             bases.push_back(ggml_backend_buffer_get_base(buf));
+            ms->extents.push_back({c.ord, ggml_backend_buffer_get_base(buf), slot_bytes, buf});
         }
         if ((int) bases.size() < plan.n_slots) {
             // not enough slots to run the ring: fall back to the baseline instead of a partial engine
@@ -479,6 +493,7 @@ llama_moe_stream * llama_moe_stream_create(const llama_model & model,
         ep.pin_host  = params.pin_host;
         ep.pin_bytes = 0;
         ep.device    = dev;
+        ep.owner     = ms->owner;
 
         auto setup = (decltype(ms->proc_setup)) v_setup;
         const int rc = setup(&ep, kv.second.data(), (int) kv.second.size(),
@@ -527,7 +542,7 @@ void llama_moe_stream_destroy(llama_moe_stream * ms) {
         // be stopped and joined before the first arena buffer is freed. tearing down only one device
         // would leak its worker and its pinned mirrors and leave a writer aimed at freed device memory
         for (const int dev : ms->devices) {
-            ms->proc_teardown(dev);
+            ms->proc_teardown(dev, ms->owner);
         }
         ms->destroyed = true;
     }
@@ -535,6 +550,7 @@ void llama_moe_stream_destroy(llama_moe_stream * ms) {
         ggml_backend_buffer_free(buf);
     }
     ms->slot_buf.clear();
+    ms->extents.clear();
     if (ms->ctx_arena) {
         ggml_free(ms->ctx_arena);
         ms->ctx_arena = nullptr;
@@ -550,10 +566,71 @@ const llama_moe_stream * llama_moe_stream_select(const llama_moe_stream * ms, in
     if (!llama_moe_stream_enabled(ms)) {
         return nullptr;
     }
-    if (n_tokens < ms->min_tokens) {
+    if (n_tokens < ms->min_tokens || ms->cache_mode) {
         return nullptr;
     }
     return ms;
+}
+
+bool llama_moe_stream_enter_cache(llama_moe_stream * ms) {
+    if (!llama_moe_stream_enabled(ms) || !ms->proc_mode) {
+        return false;
+    }
+    if (ms->cache_mode) {
+        return true;
+    }
+    for (int device : ms->devices) {
+        if (ms->proc_mode(device, ms->owner, 1) != 0) {
+            ms->enabled = false;
+            return false;
+        }
+    }
+    ms->armed = false;
+    ms->cache_mode = true;
+    return true;
+}
+
+bool llama_moe_stream_leave_cache(llama_moe_stream * ms) {
+    if (!llama_moe_stream_enabled(ms) || !ms->proc_mode) {
+        return false;
+    }
+    if (!ms->cache_mode) {
+        return true;
+    }
+    for (int device : ms->devices) {
+        if (ms->proc_mode(device, ms->owner, 0) != 0) {
+            ms->enabled = false;
+            return false;
+        }
+    }
+    ms->armed = false;
+    ms->cache_mode = false;
+    return true;
+}
+
+bool llama_moe_stream_cache_submit(llama_moe_stream * ms, int device, const ggml_cuda_moe_cache_copy & copy) {
+    return ms && ms->cache_mode && ms->proc_copy && ms->proc_copy(device, ms->owner, &copy) == 0;
+}
+
+int llama_moe_stream_cache_query(llama_moe_stream * ms, int device, uint64_t tag, bool wait) {
+    return ms && ms->cache_mode && ms->proc_query ? ms->proc_query(device, ms->owner, tag, wait) : -1;
+}
+
+bool llama_moe_stream_cache_drain(llama_moe_stream * ms) {
+    if (!ms || !ms->cache_mode || !ms->proc_drain) {
+        return false;
+    }
+    for (int device : ms->devices) {
+        if (ms->proc_drain(device, ms->owner) != 0) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool llama_moe_stream_cache_set_scratch(llama_moe_stream * ms, int device, void * base, size_t bytes) {
+    return ms && ms->cache_mode && ms->proc_scratch &&
+           ms->proc_scratch(device, ms->owner, base, bytes) == 0;
 }
 
 bool llama_moe_stream_bind(const llama_moe_stream * ms, int il, llama_moe_stream_layer_bind & out) {
