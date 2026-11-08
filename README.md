@@ -2,7 +2,7 @@
 
 This llama.cpp fork runs Qwen Flash-Next (`qwen4exp`) models with CPU-resident MoE weights. Large prompts stream expert weights through temporary GPU arenas. During generation, a phase switch places expert caches on each layer's owning GPU, reducing CPU expert reads and GPU handoffs while retaining the original fast prefill configuration.
 
-On the tested i9-13900K and two RTX 5060 Ti 16 GB GPUs, controlled steady decode improved from **23.67 to 27.43 tokens/s** with eight CPU threads. The same 8192-token prefill remained about **18.2 seconds**. The switch adds **1.98 seconds** before steady generation, so short answers can see little benefit. **40 tokens/s has not been achieved.** [Recorded measurements](docs/performance/2026-11-08/README.md).
+On the tested i9-13900K and two RTX 5060 Ti 16 GB GPUs, controlled steady decode improved from **23.67 to 27.43 tokens/s** with eight CPU threads. The same 8192-token prefill remained about **18.2 seconds**. The switch adds **1.98 seconds** before steady generation, so short answers can see little benefit. 
 
 ## Launch the installed build
 
@@ -53,9 +53,6 @@ The main comparison used one model load, four fresh contexts in off/on/on/off or
 
 Steady decode improved **15.87%**. Initial prefill differences are small and are not claimed as a prefill improvement. At these steady rates, about 342 subsequent tokens amortize the additional transition cost. Actual results depend on context, routing, and output length. Reducing splits to 137 in an earlier experiment made decode slower by losing overlap, so split count alone is not the target.
 
-Three controlled repeats per thread count found means of **21.307 t/s at 24 threads**, **23.582 t/s at 8**, and **21.020 t/s at 16**. This isolates the thread choice from the later cache-layout change. [Operation and thread summaries](docs/performance/2026-11-08/summary.json).
-
-Real 512-token HTTP chat tests retained the production prefill and template. Initial prompt processing took 29.224 seconds with original pools and 29.308 seconds with phase switching. Full generation averaged 21.58 versus 22.09 t/s; the last 128 streamed tokens reached 23.01 versus 25.76 t/s. In serving, the phase transition appears between the first and second output tokens. Natural outputs differed. [HTTP validation](docs/performance/2026-11-08/server-smoke-phase-512/validation.json).
 
 ## Brief comparison with stock llama.cpp
 
@@ -68,7 +65,7 @@ The retained stock installation is b10870 / `1945e0920` at `C:\Users\user\qwenll
 | First-to-second-token gap | 0.091 s | 2.243 s |
 | Whole request, excluding model loading | 15.111 s | 14.865 s |
 
-The steady improvement was 30.3% in this single screen, but the transition consumed most of the benefit on the short answer. Outputs and compiler/backend versions differed. This prompt was below the arena-streaming threshold, so this comparison does not measure large-prompt prefill. [Full stock comparison and provenance](docs/performance/2026-11-08/stock-vs-fast/RESULT.md).
+The steady improvement was 30.3% in this single screen, but the transition consumed most of the benefit on the short answer. Outputs and compiler/backend versions differed. This prompt was below the arena-streaming threshold, **so this comparison does not measure large-prompt prefill.** [Full stock comparison and provenance](docs/performance/2026-11-08/stock-vs-fast/RESULT.md).
 
 ## Build and validation
 
