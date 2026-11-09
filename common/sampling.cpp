@@ -12,6 +12,7 @@
 #include <climits>
 #include <cmath>
 #include <cstring>
+#include <stdexcept>
 #include <unordered_map>
 #include <vector>
 
@@ -591,6 +592,62 @@ struct llama_sampler * common_sampler_get(const struct common_sampler * gsmpl) {
     return gsmpl->chain;
 }
 
+static llama_token common_sampler_validate_selection(common_sampler * gsmpl, llama_context * ctx, int idx) {
+    auto & cur_p = gsmpl->cur_p;
+    const llama_vocab * vocab = llama_model_get_vocab(llama_get_model(ctx));
+    const int32_t n_vocab = llama_vocab_n_tokens(vocab);
+    const bool selected = cur_p.selected >= 0 && (size_t) cur_p.selected < cur_p.size;
+    const llama_token rejected = selected ? cur_p.data[cur_p.selected].id : LLAMA_TOKEN_NULL;
+    if (selected && rejected >= 0 && rejected < n_vocab && std::isfinite(cur_p.data[cur_p.selected].logit) &&
+            common_reasoning_budget_is_token_allowed(gsmpl->rbudget, rejected)) {
+        return rejected;
+    }
+
+    // Rebuild candidates because a later sampler can discard or replace masked tokens.
+    const float * logits = llama_get_logits_ith(ctx, idx);
+    if (!logits) {
+        throw std::runtime_error("sampling rejected an invalid token and raw logits are unavailable");
+    }
+    gsmpl->cur.resize(n_vocab);
+    for (llama_token token = 0; token < n_vocab; ++token) {
+        gsmpl->cur[token] = { token, logits[token], 0.0f };
+    }
+    cur_p = { gsmpl->cur.data(), gsmpl->cur.size(), -1, false };
+
+    for (const auto & bias : gsmpl->params.logit_bias) {
+        if (bias.token >= 0 && bias.token < n_vocab) {
+            cur_p.data[bias.token].logit += bias.bias;
+        }
+    }
+    int32_t n_suppress = 0;
+    const llama_token * suppress = llama_vocab_get_suppress_tokens(vocab, &n_suppress);
+    for (int32_t i = 0; i < n_suppress; ++i) {
+        cur_p.data[suppress[i]].logit = -INFINITY;
+    }
+    if (grammar_should_apply(gsmpl)) {
+        llama_sampler_apply(gsmpl->grmr, &cur_p);
+    }
+    llama_sampler_apply(gsmpl->rbudget, &cur_p);
+
+    // Do not rerun the chain: it may produce the same forbidden selection again.
+    for (size_t i = 0; i < cur_p.size; ++i) {
+        if (std::isfinite(cur_p.data[i].logit) &&
+                common_reasoning_budget_is_token_allowed(gsmpl->rbudget, cur_p.data[i].id) &&
+                (cur_p.selected < 0 || cur_p.data[i].logit > cur_p.data[cur_p.selected].logit)) {
+            cur_p.selected = i;
+        }
+    }
+    if (cur_p.selected < 0) {
+        throw std::runtime_error("sampling has no finite token allowed by the grammar and reasoning boundary");
+    }
+
+    cur_p.data[cur_p.selected].p = 1.0f;
+    const llama_token replacement = cur_p.data[cur_p.selected].id;
+    LOG_WRN("%s: rejected token id %d, selected allowed token id %d (reasoning state %d)\n",
+            __func__, rejected, replacement, (int) common_reasoning_budget_get_state(gsmpl->rbudget));
+    return replacement;
+}
+
 llama_token common_sampler_sample(struct common_sampler * gsmpl, struct llama_context * ctx, int idx, bool grammar_first) {
     llama_synchronize(ctx);
 
@@ -637,7 +694,7 @@ llama_token common_sampler_sample(struct common_sampler * gsmpl, struct llama_co
 
     llama_sampler_apply(chain, &cur_p);
 
-    id = cur_p.data[cur_p.selected].id;
+    id = common_sampler_validate_selection(gsmpl, ctx, idx);
 
     if (grammar_first || !grammar_should_apply(gsmpl)) {
         return id;
@@ -668,9 +725,7 @@ llama_token common_sampler_sample(struct common_sampler * gsmpl, struct llama_co
 
     llama_sampler_apply(chain, &cur_p);
 
-    GGML_ASSERT(cur_p.selected != -1 && "no selected token during sampling - check your sampling configuration");
-
-    id = cur_p.data[cur_p.selected].id;
+    id = common_sampler_validate_selection(gsmpl, ctx, idx);
 
     return id;
 }

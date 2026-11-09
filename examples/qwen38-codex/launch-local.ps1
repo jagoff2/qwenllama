@@ -101,5 +101,5 @@ $serverArgs = @(
     '24'
 )
 
-& 'G:\qwenllamaMTP\perf-20260911\dist\fn-fast-prefill-local-decode-think-eog-20261109\bin\llama-server.exe' @serverArgs
+& 'G:\qwenllamaMTP\perf-20260911\dist\fn-fast-prefill-local-decode-think-hard-20261109\bin\llama-server.exe' @serverArgs
 exit $LASTEXITCODE

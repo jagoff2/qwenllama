@@ -507,6 +507,113 @@ static void test_reasoning_budget_output_before_eog(const char * vocab_path) {
     llama_sampler_reset(sampler);
     check_guard(sampler, false);
     llama_sampler_free(sampler);
+
+    struct guard_case {
+        const char * name;
+        const char * suffix;
+        bool completed_reasoning;
+        bool parse_special;
+    };
+    const guard_case guard_cases[] = {
+        {"repeated closing delimiter", "</think>", true, true},
+        {"tool opening marker", "<tool_call>", true, true},
+        {"tool closing marker", "</tool_call>", true, true},
+        {"non-breaking space", "\xC2\xA0", true, true},
+        {"em space", "\xE2\x80\x83", true, true},
+        {"zero-width space", "\xE2\x80\x8B", true, true},
+        {"word joiner", "\xE2\x81\xA0", true, true},
+        {"detached closing delimiter", "</think>", false, true},
+        {"ordinary closing delimiter", "</think>", false, false},
+        {"ordinary repeated closing delimiter", "</think>", true, false},
+        {"ordinary reopened reasoning", "<think>", true, false},
+    };
+    int guard_failures = 0;
+    for (const auto & test : guard_cases) {
+        sampler = common_reasoning_budget_init(vocab, {start}, {end, tool}, forced, 100);
+        if (test.completed_reasoning) {
+            accept_text(sampler, "<think>");
+            accept_text(sampler, "Synthetic reasoning.");
+            accept_text(sampler, "</think>");
+        }
+        for (const auto token : common_tokenize(vocab, test.suffix, false, test.parse_special)) {
+            llama_sampler_accept(sampler, token);
+        }
+        for (auto & candidate : candidates) {
+            candidate.logit = 1.0f;
+        }
+        llama_token_data_array cur = { candidates.data(), candidates.size(), -1, false };
+        llama_sampler_apply(sampler, &cur);
+        bool guarded = true;
+        for (const auto & candidate : candidates) {
+            if (llama_vocab_is_eog(vocab, candidate.id) && candidate.logit != -INFINITY) {
+                guarded = false;
+            }
+        }
+        if (!guarded) {
+            fprintf(stderr, "EOG released without answer content: %s\n", test.name);
+            ++guard_failures;
+        }
+        llama_sampler_free(sampler);
+    }
+    GGML_ASSERT(guard_failures == 0 && "EOG must remain masked until answer or tool content");
+
+    sampler = common_reasoning_budget_init(vocab, {start}, {end, tool}, forced, 100, REASONING_BUDGET_DONE);
+    check_guard(sampler, true);
+    for (const auto token : common_tokenize(vocab, "<think>", false, false)) {
+        llama_sampler_accept(sampler, token);
+        check_guard(sampler, true);
+    }
+    GGML_ASSERT(common_reasoning_budget_get_state(sampler) == REASONING_BUDGET_COUNTING);
+    for (const auto token : common_tokenize(vocab, "</think>Hello", false, false)) {
+        llama_sampler_accept(sampler, token);
+    }
+    GGML_ASSERT(common_reasoning_budget_get_state(sampler) == REASONING_BUDGET_DONE);
+    check_guard(sampler, false);
+    llama_sampler_free(sampler);
+
+    const char * boundary_end_markers[] = {
+        "</think>", "</tool_call>", "</tool_response>", "<|im_end|>", "<|endoftext|>",
+        "<|fim_suffix|>", "<|vision_end|>", "<|audio_end|>",
+    };
+    sampler = common_reasoning_budget_init(vocab, {start}, {end, tool}, forced, 100, REASONING_BUDGET_DONE);
+    for (const auto * marker : boundary_end_markers) {
+        const auto tokens = common_tokenize(vocab, marker, false, true);
+        if (tokens.size() != 1 || !(llama_vocab_get_attr(vocab, tokens.front()) &
+                (LLAMA_TOKEN_ATTR_CONTROL | LLAMA_TOKEN_ATTR_USER_DEFINED))) {
+            continue;
+        }
+        const auto token = tokens.front();
+        GGML_ASSERT(!common_reasoning_budget_is_token_allowed(sampler, token));
+        llama_token_data data[] = {{token, 1000.0f, 0.0f}, {answer.front(), 1.0f, 0.0f}};
+        llama_token_data_array cur = {data, 2, -1, true};
+        llama_sampler_apply(sampler, &cur);
+        GGML_ASSERT(data[0].logit == -INFINITY && std::isfinite(data[1].logit));
+    }
+    GGML_ASSERT(common_reasoning_budget_is_token_allowed(sampler, start.front()));
+    GGML_ASSERT(common_reasoning_budget_is_token_allowed(sampler, tool.front()));
+    accept_text(sampler, "Hello");
+    for (const auto & candidate : candidates) {
+        GGML_ASSERT(common_reasoning_budget_is_token_allowed(sampler, candidate.id));
+    }
+    llama_sampler_free(sampler);
+    sampler = common_reasoning_budget_init(vocab, {start}, {end, tool}, forced, 0, REASONING_BUDGET_COUNTING);
+    GGML_ASSERT(common_reasoning_budget_is_token_allowed(sampler, forced.front()));
+    GGML_ASSERT(!common_reasoning_budget_is_token_allowed(sampler, answer.front()));
+    llama_sampler_free(sampler);
+    const llama_token eog = candidates.front().id;
+    GGML_ASSERT(llama_vocab_is_eog(vocab, eog));
+    for (const llama_tokens & invalid_forced : {llama_tokens{eog}, llama_tokens{}}) {
+        sampler = common_reasoning_budget_init(vocab, {start}, {end, tool}, invalid_forced, 0,
+                                               REASONING_BUDGET_FORCING);
+        GGML_ASSERT(!common_reasoning_budget_is_token_allowed(sampler, eog));
+        llama_token_data data[] = {{eog, 1000.0f, 0.0f}, {answer.front(), 1.0f, 0.0f}};
+        llama_token_data_array cur = {data, 2, -1, true};
+        llama_sampler_apply(sampler, &cur);
+        GGML_ASSERT(data[0].logit == -INFINITY);
+        GGML_ASSERT(invalid_forced.empty() ? std::isfinite(data[1].logit) : data[1].logit == -INFINITY);
+        llama_sampler_free(sampler);
+    }
+    GGML_ASSERT(common_reasoning_budget_is_token_allowed(nullptr, answer.front()));
     llama_model_free(model);
     printf("Output-before-EOG guard tests passed\n");
 }

@@ -12,9 +12,9 @@ The active Windows launcher is:
 & 'G:\qwenllamaMTP\perf-20260911\bench\flashnext-stream-prefill\launch-best-decode-no-draft-think-guard.ps1'
 ```
 
-An exact snapshot is tracked at [examples/qwen38-codex/launch-local.ps1](examples/qwen38-codex/launch-local.ps1). It starts `perf-20260911/dist/fn-fast-prefill-local-decode-think-eog-20261109/bin/llama-server.exe` with the original chat template, reasoning guard, and no draft model. The server binds to `127.0.0.1`.
+An exact snapshot is tracked at [examples/qwen38-codex/launch-local.ps1](examples/qwen38-codex/launch-local.ps1). It starts `perf-20260911/dist/fn-fast-prefill-local-decode-think-hard-20261109/bin/llama-server.exe` with the original chat template, reasoning guard, and no draft model. The server binds to `127.0.0.1`.
 
-The November 9 update replaces only `llama-common.dll` in the November 8 package. The reasoning guard now masks EOG during open reasoning and after closure until answer or tool content starts. Synthetic request and vocabulary-only sampler regressions passed; the performance measurements below retain their November 8 provenance.
+The November 9 hard-guard update replaces only `llama-common.dll` in the November 8 package. It blocks EOG and end markers during reasoning and after closure until answer or tool content starts; repeated tags and Unicode whitespace do not unlock termination. Final sampled tokens are checked so later samplers cannot bypass the guard. Synthetic HTTP and vocabulary-only sampler regressions passed; the performance measurements below retain their November 8 provenance.
 
 The snapshot contains absolute paths for this machine. On another installation, edit its executable, GGUF model, projector, and chat-template paths. Weights and compiled binaries are external assets. [Launch configuration and rollback](examples/qwen38-codex/README.md).
 
