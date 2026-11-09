@@ -7517,6 +7517,63 @@ static void test_reasoning_budget_tokens_per_request() {
     }
 }
 
+static void test_qwen_reasoning_guard_request_setup() {
+    LOG_DBG("%s\n", __func__);
+    server_chat_params opt;
+    opt.tmpls = read_templates("examples/qwen38-codex/qwen38-codex-system-role-demoted.jinja");
+    opt.use_jinja        = true;
+    opt.enable_thinking  = true;
+    opt.reasoning_budget = -1;
+    opt.reasoning_format = COMMON_REASONING_FORMAT_NONE;
+
+    // Raw reasoning output and an unlimited budget must still provision the guard.
+    // These histories are synthetic; the compacted case replaces the prior turns.
+    const json histories = {
+        {"fresh", json::array({
+            {{"role", "system"}, {"content", "Complete the synthetic status task."}},
+            {{"role", "user"}, {"content", "Check the status."}},
+        })},
+        {"tool_result", json::array({
+            {{"role", "system"}, {"content", "Complete the synthetic status task."}},
+            {{"role", "user"}, {"content", "Check the status."}},
+            {{"role", "assistant"}, {"content", ""}, {"reasoning_content", "I will check the status."},
+             {"tool_calls", json::array({{
+                 {"id", "synthetic_call"}, {"type", "function"},
+                 {"function", {{"name", "synthetic_status"}, {"arguments", "{}"}}},
+             }})}},
+            {{"role", "tool"}, {"tool_call_id", "synthetic_call"}, {"content", "ready"}},
+        })},
+        {"compacted", json::array({
+            {{"role", "system"}, {"content", "Complete the synthetic status task."}},
+            {{"role", "user"}, {"content", "Synthetic summary: the status check returned ready. "
+                "Earlier reasoning was <think>Check the status.</think>. The final answer is pending."}},
+            {{"role", "user"}, {"content", "Continue from the summary."}},
+        })},
+    };
+
+    for (const auto & history : histories.items()) {
+        LOG_DBG("reasoning guard request setup: %s\n", history.key().c_str());
+        json body = {
+            {"messages", history.value()},
+            {"tools", json::array({{
+                {"type", "function"},
+                {"function", {
+                    {"name", "synthetic_status"},
+                    {"parameters", {{"type", "object"}, {"properties", json::object()}}},
+                }},
+            }})},
+        };
+        std::vector<raw_buffer> out_files;
+        const auto params = oaicompat_chat_params_parse(body, opt, out_files);
+        assert_equals(-1, params.at("reasoning_budget_tokens").get<int>());
+        assert_equals(std::string("<think>"), params.at("reasoning_budget_start_tag").get<std::string>());
+        assert_equals(json::array({"</think>", "<tool_call>"}).dump(), params.at("reasoning_budget_end_tags").dump());
+        const auto generation_prompt = params.at("generation_prompt").get<std::string>();
+        assert_equals(std::string("<|im_start|>assistant\n<think>\n"), generation_prompt);
+        assert_ends_with(params.at("prompt").get<std::string>(), generation_prompt);
+    }
+}
+
 static void test_reasoning_budget_message_per_request() {
     LOG_DBG("%s\n", __func__);
     // Same code path as test_reasoning_budget_tokens_per_request: the Qwen3 template's
@@ -7732,6 +7789,7 @@ int main(int argc, char ** argv) {
         test_template_generation_prompt();
         test_reasoning_effort_caps();
         test_reasoning_budget_tokens_per_request();
+        test_qwen_reasoning_guard_request_setup();
         test_reasoning_budget_message_per_request();
         test_template_output_peg_parsers(detailed_debug);
         std::cout << "\n[chat] All tests passed!" << '\n';

@@ -175,8 +175,10 @@ static void common_reasoning_budget_accept(struct llama_sampler * smpl, llama_to
 static void common_reasoning_budget_apply(struct llama_sampler * smpl, llama_token_data_array * cur_p) {
     auto * ctx = (common_reasoning_budget_ctx *) smpl->ctx;
 
-    if (ctx->state == REASONING_BUDGET_DONE && ctx->awaiting_output && ctx->vocab) {
-        // Require answer or tool content after reasoning, allowing leading whitespace.
+    const bool reasoning_active = ctx->state == REASONING_BUDGET_COUNTING ||
+                                  ctx->state == REASONING_BUDGET_WAITING_UTF8;
+    if (ctx->vocab && (reasoning_active || (ctx->state == REASONING_BUDGET_DONE && ctx->awaiting_output))) {
+        // Finish reasoning and start answer or tool content before allowing EOG.
         for (size_t i = 0; i < cur_p->size; i++) {
             if (llama_vocab_is_eog(ctx->vocab, cur_p->data[i].id)) {
                 cur_p->data[i].logit = -INFINITY;

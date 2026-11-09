@@ -12,7 +12,9 @@ Run the installed configuration with:
 & 'G:\qwenllamaMTP\perf-20260911\bench\flashnext-stream-prefill\launch-best-decode-no-draft-think-guard.ps1'
 ```
 
-The executable is `G:\qwenllamaMTP\perf-20260911\dist\fn-fast-prefill-local-decode-20261108\bin\llama-server.exe`. The script enables the N=1 masked MMID path and phase-specific expert pools, with eight decode threads and 24 batch threads. It preserves the original 261888-token context capacity, F16 KV, 4096 batch/microbatch, primary-GPU arena prefill, thinking guard, and no-draft configuration.
+The executable is `G:\qwenllamaMTP\perf-20260911\dist\fn-fast-prefill-local-decode-think-eog-20261109\bin\llama-server.exe`. The script enables the N=1 masked MMID path and phase-specific expert pools, with eight decode threads and 24 batch threads. It preserves the original 261888-token context capacity, F16 KV, 4096 batch/microbatch, primary-GPU arena prefill, thinking guard, and no-draft configuration.
+
+The November 9 update replaces only `llama-common.dll` and masks EOG during open reasoning and after closure until answer or tool content starts. Synthetic request and vocabulary-only sampler regressions passed. The exact chat template remains `G:\qwenllamaMTP\qwen38-codex-system-role-demoted.jinja`.
 
 `launch-pre-phase.ps1` preserves the previous launcher and selects `dist/fn-decode-cache-think-guard-20261006/bin`. It is also available locally as `launch-best-decode-no-draft-think-guard.pre-phase-20261108.ps1`. Stop an existing server before starting either configuration on the same port. The rollback launcher restores the complete previous settings, including its earlier thread defaults; it is not the matched eight-thread benchmark control.
 

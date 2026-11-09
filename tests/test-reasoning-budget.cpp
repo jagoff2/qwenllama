@@ -414,7 +414,19 @@ static void test_reasoning_budget_output_before_eog(const char * vocab_path) {
     accept_text(sampler, "An ordinary answer.");
     check_guard(sampler, false);
     accept_text(sampler, "<think>Let me read the manifest.");
-    check_guard(sampler, false);
+    check_guard(sampler, true);
+    accept_text(sampler, "Consider the next step.");
+    check_guard(sampler, true);
+
+    auto * reasoning_clone = llama_sampler_clone(sampler);
+    check_guard(reasoning_clone, true);
+    accept_text(reasoning_clone, "</think>");
+    check_guard(reasoning_clone, true);
+    accept_text(reasoning_clone, "Hello");
+    check_guard(reasoning_clone, false);
+    check_guard(sampler, true);
+    llama_sampler_free(reasoning_clone);
+
     accept_text(sampler, "</think>");
     check_guard(sampler, true);
     for (const auto token : common_tokenize(vocab, "\n\n \t\r\n", false, true)) {
@@ -440,9 +452,47 @@ static void test_reasoning_budget_output_before_eog(const char * vocab_path) {
     accept_text(sampler, "</think>");
     check_guard(sampler, true);
     accept_text(sampler, "<think>");
+    check_guard(sampler, true);
+    accept_text(sampler, "<tool_call>");
+    check_guard(sampler, true);
+    accept_text(sampler, "\n<function=read_file>");
     check_guard(sampler, false);
-    accept_text(sampler, "<tool_call>\n<function=read_file>");
+    llama_sampler_free(sampler);
+
+    // A generation prompt ending in <think> starts with the same EOG protection.
+    sampler = common_reasoning_budget_init(vocab, {start}, {end, tool}, forced, 100,
+                                           REASONING_BUDGET_COUNTING);
+    check_guard(sampler, true);
+    accept_text(sampler, "Consider the next step.");
+    check_guard(sampler, true);
+    accept_text(sampler, "</think>");
+    accept_text(sampler, "\n\n");
+    check_guard(sampler, true);
+    accept_text(sampler, "Hello");
     check_guard(sampler, false);
+    llama_sampler_free(sampler);
+
+    // Completing a split UTF-8 character must not expose EOG after budget expiry.
+    sampler = common_reasoning_budget_init(vocab, {start}, {end, tool}, forced, 1,
+                                           REASONING_BUDGET_COUNTING);
+    llama_token split_utf8 = LLAMA_TOKEN_NULL;
+    for (llama_token token = 0; token < llama_vocab_n_tokens(vocab); ++token) {
+        if (!common_utf8_is_complete(common_token_to_piece(vocab, token, false))) {
+            split_utf8 = token;
+            break;
+        }
+    }
+    GGML_ASSERT(split_utf8 != LLAMA_TOKEN_NULL);
+    llama_sampler_accept(sampler, split_utf8);
+    GGML_ASSERT(common_reasoning_budget_get_state(sampler) == REASONING_BUDGET_WAITING_UTF8);
+    check_guard(sampler, true);
+    accept_text(sampler, "x");
+    GGML_ASSERT(common_reasoning_budget_get_state(sampler) == REASONING_BUDGET_FORCING);
+    for (const auto token : forced) {
+        GGML_ASSERT(get_forced_token(sampler, llama_vocab_n_tokens(vocab) - 1) == token);
+        llama_sampler_accept(sampler, token);
+    }
+    check_guard(sampler, true);
     llama_sampler_free(sampler);
 
     sampler = common_reasoning_budget_init(vocab, {start}, {end, tool}, forced, 0,

@@ -20,8 +20,8 @@ enum common_reasoning_budget_state {
 //
 // State machine: IDLE -> COUNTING -> WAITING_UTF8 -> FORCING -> DONE
 //   IDLE:         passthrough, watching for a start sequence
-//   COUNTING:     counting down remaining tokens, watching for a natural end sequence
-//   WAITING_UTF8: budget exhausted, allowing tokens to complete a UTF-8 sequence
+//   COUNTING:     suppress EOG, count down tokens, watch for a natural end sequence
+//   WAITING_UTF8: suppress EOG, allow tokens to complete a UTF-8 sequence
 //   FORCING:      forces forced_tokens token-by-token (all other logits -> -inf)
 //   DONE:         suppress EOG until non-whitespace output starts
 //
