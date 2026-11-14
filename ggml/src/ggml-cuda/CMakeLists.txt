@@ -1,5 +1,16 @@
 cmake_minimum_required(VERSION 3.18)  # for CMAKE_CUDA_ARCHITECTURES
 
+# Reuse the verified optimized CUDA DLL while rebuilding the recurrent model/core.
+# This is opt-in and leaves ordinary source builds unchanged.
+if (DORY_PREBUILT_CUDA_IMPLIB AND DORY_PREBUILT_CUDA_DLL)
+    add_library(ggml-cuda SHARED IMPORTED GLOBAL)
+    set_target_properties(ggml-cuda PROPERTIES
+        IMPORTED_IMPLIB "${DORY_PREBUILT_CUDA_IMPLIB}"
+        IMPORTED_LOCATION "${DORY_PREBUILT_CUDA_DLL}")
+    target_link_libraries(ggml PUBLIC ggml-cuda)
+    return()
+endif()
+
 find_package(CUDAToolkit)
 
 if (CUDAToolkit_FOUND)

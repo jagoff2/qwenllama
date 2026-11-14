@@ -2425,7 +2425,9 @@ struct llama_model_qwen4exp : public llama_model_base {
 
         ggml_tensor * build_layer_ffn(
                     ggml_tensor * cur,
-                            int   il);
+                            int   il,
+                   ggml_tensor ** pinned_experts = nullptr,
+                   ggml_tensor ** pinned_logits = nullptr);
 
         ggml_tensor * build_norm_gated(
                     ggml_tensor * input,

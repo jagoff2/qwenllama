@@ -14,7 +14,9 @@
 #include <cinttypes>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
 #include <map>
+#include <stdexcept>
 #include <vector>
 
 // slack so that ggml's per-tensor allocation alignment never runs past the end of an arena buffer
@@ -131,6 +133,19 @@ llama_moe_stream * llama_moe_stream_create(const llama_model & model,
 
     const int n_layer = (int) model.hparams.n_layer();
 
+    // The streamed-expert ring assumes each layer is visited once in ascending
+    // order. Repeated layers must stay out of the plan (and its lookahead kicks).
+    // Decode caching currently shares eligibility with this plan.
+    int loop_start = -1, loop_end = -1, loop_passes = 1;
+    if (model.arch == LLM_ARCH_QWEN4EXP) {
+        if (const char * config = std::getenv("QWEN4EXP_LOOP_CONFIG")) {
+            std::ifstream in(config);
+            if (!(in >> loop_start >> loop_end >> loop_passes)) {
+                throw std::runtime_error("invalid QWEN4EXP_LOOP_CONFIG for expert streaming");
+            }
+        }
+    }
+
     // resolve the entry points before anything is allocated: any failure path has to be able to
     // unregister the engine before the arenas it points at go away
     void * v_teardown = proc(devs[0].reg, GGML_MOE_STREAM_PROC_TEARDOWN);
@@ -189,6 +204,9 @@ llama_moe_stream * llama_moe_stream_create(const llama_model & model,
         const bool is_moe = traits.gate_input || traits.fused_gate_up || orig[il][0] || orig[il][1] || orig[il][2];
         n_moe += is_moe;
         const char * rejection = llama_moe_plan::source_rejection(traits, LLAMA_MOE_STREAM_MAX_DEVICES);
+        if (loop_passes > 1 && il >= loop_start && il <= loop_end) {
+            rejection = "recurrent layer uses ordinary experts";
+        }
         plan_in[il].il     = il;
         plan_in[il].device = traits.device;
         if (!rejection[0]) {
@@ -242,9 +260,38 @@ llama_moe_stream * llama_moe_stream_create(const llama_model & model,
         }
 
         std::string note;
-        const std::vector<int> arena = llama_moe_plan::place_arena(
+        std::vector<int> arena = llama_moe_plan::place_arena(
                 layer_dev, lay_bytes, (int) devs.size(), params.place_mode, params.place_device,
                 params.place_w, &note);
+
+        if (params.place_mode == 1 && params.place_device < 0 && params.reserve_bytes && !lay_bytes.empty()) {
+            const uint64_t needed = *std::max_element(lay_bytes.begin(), lay_bytes.end()) + FN_SLOT_SLACK;
+            const auto assigned = std::find_if(arena.begin(), arena.end(), [](int device) { return device >= 0; });
+            const int preferred = assigned == arena.end() ? -1 : *assigned;
+            uint64_t preferred_budget = 0;
+            uint64_t best_budget = 0;
+            int best_device = -1;
+            for (const auto & c : devs) {
+                size_t free_b = 0, total_b = 0;
+                ggml_backend_dev_memory(c.dev, &free_b, &total_b);
+                const uint64_t requested = (size_t) c.ord < params.device_budget_bytes.size() ? params.device_budget_bytes[c.ord] : 0;
+                const uint64_t available = llama_moe_plan::arena_budget(requested ? requested : params.budget_bytes,
+                        free_b, uint64_t(2048) << 20, params.reserve_bytes);
+                if (c.ord == preferred) {
+                    preferred_budget = available;
+                }
+                if (available > best_budget) {
+                    best_budget = available;
+                    best_device = c.ord;
+                }
+            }
+            if (preferred_budget < needed && best_budget >= needed) {
+                arena = llama_moe_plan::place_arena(layer_dev, lay_bytes, (int) devs.size(),
+                        params.place_mode, best_device, params.place_w, &note);
+                LLAMA_LOG_INFO("%s: moving automatic primary arena from device %d to %d to preserve prefill headroom\n",
+                               __func__, preferred, best_device);
+            }
+        }
 
         for (int il = 0; il < n_layer; ++il) {
             if (!plan_in[il].nbytes) {
@@ -299,6 +346,8 @@ llama_moe_stream * llama_moe_stream_create(const llama_model & model,
     // size the ring against the smallest free VRAM across the devices that own streamed layers,
     // so the arena cannot be the reason an allocation fails later
     size_t budget = 0;
+    std::array<uint64_t, LLAMA_MOE_STREAM_MAX_DEVICES> device_budget = {};
+    bool device_override = false;
     {
         bool first = true;
         for (const auto & c : devs) {
@@ -315,10 +364,19 @@ llama_moe_stream * llama_moe_stream_create(const llama_model & model,
             size_t free_b = 0, total_b = 0;
             ggml_backend_dev_memory(c.dev, &free_b, &total_b);
             // leave the requested headroom plus slack for the compute buffers the graphs still need
-            const size_t avail = llama_moe_plan::arena_budget(params.budget_bytes, free_b, uint64_t(2048) << 20);
+            const uint64_t requested = (size_t) c.ord < params.device_budget_bytes.size() ? params.device_budget_bytes[c.ord] : 0;
+            device_override = device_override || requested != 0;
+            const size_t avail = llama_moe_plan::arena_budget(requested ? requested : params.budget_bytes,
+                    free_b, uint64_t(2048) << 20, params.reserve_bytes);
+            device_budget[c.ord] = avail;
             LLAMA_LOG_INFO("%s: device %d free=%.1f MiB total=%.1f MiB budget=%.1f MiB (%s) slot_allocation=%.1f MiB\n",
                            __func__, c.ord, free_b / 1048576.0, total_b / 1048576.0, avail / 1048576.0,
-                           params.budget_bytes ? "explicit" : "auto, 2048 MiB reserve", (slot_bytes + FN_SLOT_SLACK) / 1048576.0);
+                           requested ? "device override" : params.budget_bytes ? "explicit" : "auto, 2048 MiB reserve",
+                           (slot_bytes + FN_SLOT_SLACK) / 1048576.0);
+            if (params.reserve_bytes) {
+                LLAMA_LOG_INFO("%s: device %d retains %.1f MiB for prefill graph growth and CUDA scratch\n",
+                               __func__, c.ord, params.reserve_bytes / 1048576.0);
+            }
             budget = first ? avail : std::min(budget, avail);
             first = false;
         }
@@ -344,6 +402,12 @@ llama_moe_stream * llama_moe_stream_create(const llama_model & model,
     const llama_moe_plan::result plan = llama_moe_plan::plan(plan_in, pcfg);
     if (!plan.enabled) {
         LLAMA_LOG_WARN("%s: expert streaming disabled: %s\n", __func__, plan.reason.c_str());
+        delete ms;
+        return nullptr;
+    }
+    if (device_override && plan.n_slots != params.n_slots) {
+        LLAMA_LOG_WARN("%s: device arena budgets cannot preserve the requested %d-slot ring\n",
+                       __func__, params.n_slots);
         delete ms;
         return nullptr;
     }
@@ -385,16 +449,34 @@ llama_moe_stream * llama_moe_stream_create(const llama_model & model,
         if (!used) {
             continue;
         }
-        ms->slot_bytes[c.ord] = slot_bytes;
+        size_t payload_bytes = slot_bytes;
+        if ((size_t) c.ord < params.device_budget_bytes.size() && params.device_budget_bytes[c.ord]) {
+            size_t free_b = 0, total_b = 0;
+            ggml_backend_dev_memory(c.dev, &free_b, &total_b);
+            payload_bytes = llama_moe_plan::arena_slot_payload(
+                    std::min(device_budget[c.ord], (uint64_t) free_b), slot_bytes,
+                    plan.n_slots, FN_SLOT_SLACK, FN_SLOT_ALIGN);
+            if (payload_bytes == 0) {
+                LLAMA_LOG_WARN("%s: device %d cannot fit %d arena slots within the current memory budget\n",
+                               __func__, c.ord, plan.n_slots);
+                llama_moe_stream_destroy(ms);
+                return nullptr;
+            }
+            LLAMA_LOG_INFO("%s: device %d arena payload %.1f MiB per slot, allocation %.1f MiB total%s\n",
+                           __func__, c.ord, payload_bytes / 1048576.0,
+                           plan.n_slots * ((uint64_t) payload_bytes + FN_SLOT_SLACK) / 1048576.0,
+                           params.pin_host ? "; pinned host staging follows arena capacity" : "");
+        }
+        ms->slot_bytes[c.ord] = payload_bytes;
 
         std::vector<void *> bases;
         std::vector<ggml_backend_buffer_t> dev_bufs;
         for (int k = 0; k < plan.n_slots; ++k) {
             ggml_backend_buffer_t buf = ggml_backend_buft_alloc_buffer(
-                    ggml_backend_dev_buffer_type(c.dev), slot_bytes + FN_SLOT_SLACK);
+                    ggml_backend_dev_buffer_type(c.dev), payload_bytes + FN_SLOT_SLACK);
             if (!buf) {
                 LLAMA_LOG_WARN("%s: device %d could not allocate arena slot %d of %zu MiB\n",
-                               __func__, c.ord, k, slot_bytes >> 20);
+                               __func__, c.ord, k, payload_bytes >> 20);
                 break;
             }
             // WEIGHTS usage is what keeps a remote arena honest: ggml schedules an op with weights on
@@ -404,7 +486,7 @@ llama_moe_stream * llama_moe_stream_create(const llama_model & model,
             ms->slot_buf.push_back(buf);
             dev_bufs.push_back(buf);
             bases.push_back(ggml_backend_buffer_get_base(buf));
-            ms->extents.push_back({c.ord, ggml_backend_buffer_get_base(buf), slot_bytes, buf});
+            ms->extents.push_back({c.ord, ggml_backend_buffer_get_base(buf), payload_bytes, buf});
         }
         if ((int) bases.size() < plan.n_slots) {
             // not enough slots to run the ring: fall back to the baseline instead of a partial engine
@@ -475,7 +557,7 @@ llama_moe_stream * llama_moe_stream_create(const llama_model & model,
             std::memset(&s, 0, sizeof(s));
             s.slot = k;
             s.dev  = base[dev][k];
-            s.cap  = slot_bytes;
+            s.cap  = ms->slot_bytes[dev];
             for (int f = 0; f < 3; ++f) {
                 // slot capacity is advertised as the largest family footprint any layer needs there
                 size_t mx = 0;
@@ -517,7 +599,7 @@ llama_moe_stream * llama_moe_stream_create(const llama_model & model,
         ms->boot_layer[dev].push_back(plan_in[pos].il);
     }
 
-    LLAMA_LOG_INFO("%s: streamed experts armed: %d layer(s), %d slot(s) of %.1f MiB, %zu MiB cross "
+    LLAMA_LOG_INFO("%s: streamed experts armed: %d layer(s), %d slot(s) per device, %.1f MiB max layer image, %zu MiB cross "
                    "PCIe per micro-batch (min %d tokens), %d layer(s) remote\n", __func__,
                    plan.n_streamed, plan.n_slots, slot_bytes / 1048576.0,
                    plan.stream_bytes >> 20, (int) params.min_tokens, n_remote);

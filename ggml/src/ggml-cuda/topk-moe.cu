@@ -44,7 +44,30 @@ __device__ void softmax_warp_inplace(float (&vals)[experts_per_thread], const in
         }
     }
 
-    sum = warp_reduce_sum(sum);
+    if constexpr (!use_limit && experts_per_thread > 1) {
+        // Match the standalone softmax's block reduction order. Each register
+        // group represents one virtual warp of its (up to 1024-thread) block.
+        // Fusion eligibility can change with allocation/layout; changing the
+        // reduction tree here otherwise changes router weights as well.
+        constexpr int nwarps = experts_per_thread < 32 ? experts_per_thread : 32;
+        float warp_sums = 0.0f;
+#pragma unroll
+        for (int w = 0; w < nwarps; ++w) {
+            float part = 0.0f;
+#pragma unroll
+            for (int i = w; i < experts_per_thread; i += nwarps) {
+                part += vals[i];
+            }
+            part = warp_reduce_sum(part);
+            const float leader = __shfl_sync(0xffffffff, part, 0);
+            if (lane == w) {
+                warp_sums = leader;
+            }
+        }
+        sum = warp_reduce_sum(warp_sums);
+    } else {
+        sum = warp_reduce_sum(sum);
+    }
 
     const float inv_sum = 1.0f / sum;
 
@@ -243,14 +266,19 @@ __global__ void topk_moe_cuda(const float *         logits,
 
         if ((max_expert & (WARP_SIZE - 1)) == threadIdx.x) {
             ids[k] = max_expert;
-            if (config.with_norm) {
-                wt_sum += max_val;
-            }
         }
     }
 
     if (config.with_norm) {
+        // SUM_ROWS consumes selected weights in rank order and publishes lane
+        // zero's result. Summing by original expert lane uses a different tree.
+        wt_sum = 0.0f;
+#pragma unroll
+        for (int i = 0; i < experts_per_thread; ++i) {
+            wt_sum += output_weights[i];
+        }
         wt_sum              = warp_reduce_sum(wt_sum);
+        wt_sum              = __shfl_sync(0xffffffff, wt_sum, 0);
         wt_sum              = max(wt_sum, clamp_val);
         const float inv_sum = 1.0f / wt_sum;
 

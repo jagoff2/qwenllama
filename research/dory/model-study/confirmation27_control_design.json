@@ -1,0 +1,120 @@
+{
+  "frozen_at_utc": "2026-11-13T18:42:57.640554+00:00",
+  "primary_design_sha256": "026e6d56b4d5b6e3dc3213bc1578ff455d26a3489c76b100994c5b1e8e583467",
+  "primary_candidate_unchanged": true,
+  "selected_thought_budget": 8,
+  "best_short_thought_budget": 4,
+  "best_short_rule": "Highest development exact accuracy among positive 2/4/8 budgets; ties use lower mean latency.",
+  "budget_selection_rule": "Choose the largest positive thought budget whose mean measured latency is no greater than loop mean on the same cases; if none fits, use the smallest positive budget and disclose its excess cost. Report every budget, including the 0-token transition control.",
+  "loop_on_same_dev16": {
+    "n": 16,
+    "correct": 9,
+    "mean_seconds": 2.42458565625,
+    "mean_generated_tokens": 9.75,
+    "mean_thought_tokens": 0,
+    "natural_thought_close": 0,
+    "final_eog_count": 16
+  },
+  "short_thought_controls": {
+    "0": {
+      "n": 16,
+      "correct": 7,
+      "mean_seconds": 2.1585233125,
+      "mean_generated_tokens": 9.75,
+      "mean_thought_tokens": 0,
+      "natural_thought_close": 0,
+      "final_eog_count": 16
+    },
+    "2": {
+      "n": 16,
+      "correct": 4,
+      "mean_seconds": 2.33837120625,
+      "mean_generated_tokens": 9.75,
+      "mean_thought_tokens": 2,
+      "natural_thought_close": 0,
+      "final_eog_count": 16
+    },
+    "4": {
+      "n": 16,
+      "correct": 7,
+      "mean_seconds": 2.5236906625,
+      "mean_generated_tokens": 9.6875,
+      "mean_thought_tokens": 4,
+      "natural_thought_close": 0,
+      "final_eog_count": 16
+    },
+    "8": {
+      "n": 16,
+      "correct": 1,
+      "mean_seconds": 2.37060194375,
+      "mean_generated_tokens": 5.5625,
+      "mean_thought_tokens": 8,
+      "natural_thought_close": 0,
+      "final_eog_count": 16
+    }
+  },
+  "selected_to_loop_latency_ratio": 0.9777348709620372,
+  "fits_loop_latency": true,
+  "compact_256_thought_control": {
+    "n": 16,
+    "correct": 12,
+    "mean_seconds": 28.02044208125,
+    "mean_generated_tokens": 9.75,
+    "mean_thought_tokens": 256,
+    "natural_thought_close": 0,
+    "final_eog_count": 16
+  },
+  "confirmation_controls": [
+    "original no-fusion exact parity, all192",
+    "original fused, all192",
+    "stock thought budget 8, original prompt, all192",
+    "stock best short thought budget 4, original prompt, all192"
+  ],
+  "limitations": [
+    "Separate control runs do not provide interleaved latency comparison.",
+    "Thought prompts and the separately decoded closing tag differ from primary closed-thought prefill.",
+    "Long-thought compact prompt is a stronger development control, not held-out evidence."
+  ],
+  "source_sha256": {
+    "cost25_design.json": "c34494b48f71e354679cae203abec4840f73d52bdee1cf944875edc149c8ddc4",
+    "cost25_dev16.jsonl": "063a0370b273a98d9d63e61425c9033e396d23e6148561ddbda0954a51b1fdfd",
+    "replication22_norm28_31x4.jsonl": "7466817b607dc0789346c2d0a5f6236f8a96347b709a35d2cda835df5bc06543",
+    "cost25long_stock_thought256.jsonl": "7413fd30f05bfa762613fd030fb3bd1404c7300c0adeb0510ac17204100660b8",
+    "cost25_stock_thought0.jsonl": "3807a2dcd969a6f35dbc1b39dcef69ea62a97eb52ca248e25629fc11826a1c19",
+    "cost25_stock_thought2.jsonl": "b7beaf66e8d66e421172b812ef97ad84b1c15344b9c30f81359e69d6bfe61a80",
+    "cost25_stock_thought4.jsonl": "d5f3941d5044eb1d44504a280ee8e3707d220f27b2411eeb52e99243be98b9a5",
+    "cost25_stock_thought8.jsonl": "4d128ad6b29baa04e9ee6979cdb696fb78219c5f2a2943e02b469eb9cc5d58ea"
+  },
+  "runtime_sha256": {
+    "stock_bin\\ggml-base.dll": "7d2d52ae24c5426d27d6cad7b4377fb83d780ef4f70ca99a8bd02b9353fb6c61",
+    "stock_bin\\ggml-cpu.dll": "c426c0072f7ae17a14eacc081bc095c6dd836b9939570583994ee5fbc7fb0107",
+    "stock_bin\\ggml-cuda.dll": "ccb0bccaeb6812bb50c3cd57f84d94049c112b7bf97c7f12406c6c2899a747a3",
+    "stock_bin\\ggml.dll": "357cd2318324ebbdab5caf4a9c97a631526009d80a9ec6b6e98f05915bfb8815",
+    "stock_bin\\llama-batched-bench-impl.dll": "d293a8c62fc7f8279da3b84e45590ea131ccb0b5efee9d3f57595d20b4950a81",
+    "stock_bin\\llama-bench-impl.dll": "7e2bb4a16c06abac4ba6976a1ad91ca5a40cdf30e4ef0a49c10cfd2e99fe5647",
+    "stock_bin\\llama-cli-impl.dll": "a437c0c7367c22015054f0baf26c177f985d7a26e4ca3478062cd8585ae4f79c",
+    "stock_bin\\llama-common.dll": "ddf76f7b7c647880e5f6dcd276840eb61878d93fd795daa5d76be97ea5b59529",
+    "stock_bin\\llama-completion-impl.dll": "86576e56e0fc1f7feb689849ac54e5bc55f6986e72d7975b59371ecf70418f60",
+    "stock_bin\\llama-fit-params-impl.dll": "448ba5779d3ebd062cd3b188abac10122e800bb24a9f805fc56393139b558d03",
+    "stock_bin\\llama-perplexity-impl.dll": "33ff14632fc866df9d944483d6e116fc1f9fc3a37b056be202156b9e781c0f43",
+    "stock_bin\\llama-quantize-impl.dll": "123f615c02dabf974dfb303da886d136ed16a0ea72c83794605a7ba7dfa1afdc",
+    "stock_bin\\llama-server-impl.dll": "fd862a563ab091f623388914a0a6ad7776442b9b03246265529c14f40f37dcd2",
+    "stock_bin\\llama.dll": "b5431edcaa0d0a9317ec7231a63faa4e37a22495c2dc181885e5e62f539f2b46",
+    "stock_bin\\mtmd.dll": "f616f63fda5e04279c577fcee58cfe5d682ae9cc137e5b8734f683b204c198e4",
+    "stock_bin\\latent-eval-v3.exe": "b34a372c6e0012e3a96211992caceaf671d71c3dce7e75e728f6e5c72dd83cde",
+    "confirmation27_bin\\latent-eval-thinking.exe": "e47e7cf41fbc93f876b0bcfc71ba2b36218b77ce32ce9f8e08b6da48b35f1bb4",
+    "confirmation27_bin\\llama.dll": "eed12efe1ca3a6692c820820f5db70466cb9be4c5ada7e0094beb545ad8dfca9",
+    "explore.py": "d9abedbb49c15f0a7e7aff3af6af8a548cd8b1248c7bc8cd878356de600b018b",
+    "confirmation27_baselines.py": "cb0b37bb1e6ffde1711c7edd615422fcd1f63289a690964c60d609a305668860",
+    "math_tasks.py": "957adc316406695fde16296a7e1a43bb9a021f7f223c71cc8d8c1997d91d4bb0",
+    "evaluate.py": "c3fa63265b641f5735d904451b7998203c52b7c5e6c9f7f226809752014632b8",
+    "tasks.py": "2334ebf7a2dcd8e056b45a2722454d9d4ec641097357c72cfd0f03bf950c5b04",
+    "integer_eval.py": "c69b141615f513d4a740088017a0104b5cf04657eddbcf6bb87515a6bc514967",
+    "integer_tasks.py": "d749828e605580c266c2c45e65afda9da16e2f412010c1b08eee548cc8550854",
+    "confirmation27_preflight.py": "571b241d9350abb3fb3df447984e16a7b83dc66fcf16b56fa5987ef66f55592f",
+    "thinking_sweep.py": "cff047309aad09704bac7f2c315975432f1a254f4d92177dbac5dd5dba0f5ab8",
+    "direct.py": "4a7766f4ed249583d154011c46060789ca6c208c0d5573b215b408cd0ec8f8b9",
+    "confirmation27_score.py": "ff63216cfed6b4cdbd5f7bd87d7e115a127a6a65f5de61e903d2428e733910a8",
+    "prepare_confirmation27_controls.py": "1729373e7e7cb4a381b891d0523d0babeac434ca4ed3e863ef4542caa6610226"
+  }
+}

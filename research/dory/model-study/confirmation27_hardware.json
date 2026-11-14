@@ -1,0 +1,16 @@
+﻿{
+    "captured_utc":  "2026-11-13T18:51:45.5539782Z",
+    "cpu":  {
+                "Name":  "13th Gen Intel(R) Core(TM) i9-13900K",
+                "NumberOfCores":  24,
+                "NumberOfLogicalProcessors":  32
+            },
+    "memory":  {
+                   "TotalPhysicalMemory":  205900570624
+               },
+    "gpu":  [
+                "NVIDIA GeForce RTX 5060 Ti, 16311 MiB, 596.36",
+                "NVIDIA GeForce RTX 5060 Ti, 16311 MiB, 596.36"
+            ],
+    "note":  "Read-only hardware inventory; no PATH changes"
+}

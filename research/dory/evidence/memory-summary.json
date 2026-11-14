@@ -1,0 +1,30 @@
+{
+  "hashes": {
+    "llama.dll": "d2c9a0ba581e77159398700a859b9e79a7806568424f44e3c0d419087c221255",
+    "ggml-base.dll": "1f6d3da9bf09a36597a043594e89a977708d79b226de1ee50119cbf99a329593",
+    "ggml-cuda.dll": "7ffa83527d7a9bc818788fa14c19c468a9b891b0e4b5053bba6ab8de89eef2bf"
+  },
+  "streamed_ubatches": 38,
+  "prefill_to_decode": 3,
+  "decode_to_prefill": 2,
+  "cuda_graph_launch_lower_bound": 84224,
+  "oom": false,
+  "passed": true,
+  "context": 261888,
+  "microbatch": 2048,
+  "prefill_reserve_mib": 512,
+  "prompt_lengths": [
+    23486,
+    33,
+    32768,
+    23486
+  ],
+  "decode_tokens_per_second": [
+    20.10737020278559,
+    20.426857231888487,
+    20.167693979998706
+  ],
+  "decode_median_tokens_per_second": 20.167693979998706,
+  "planner_checks": 9607,
+  "planner_failures": 0
+}

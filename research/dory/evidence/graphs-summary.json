@@ -1,0 +1,215 @@
+{
+  "cuda_sha256": "7ffa83527d7a9bc818788fa14c19c468a9b891b0e4b5053bba6ab8de89eef2bf",
+  "full_vocab": {
+    "vocab": 248320,
+    "rows_per_mode": 23,
+    "neutral_controls": 2,
+    "original_max_abs": {
+      "neutral": 3.8024237155914307,
+      "wide_neutral": 9.015042304992676
+    },
+    "final_exact": true,
+    "final_max_abs": 0.0,
+    "final_graph_reuses": {
+      "stock": 21,
+      "neutral": 21,
+      "wide_neutral": 21,
+      "loop": 21
+    }
+  },
+  "reuse_capture_equivalence": {
+    "reuse_only": {
+      "stock": true,
+      "neutral": true,
+      "wide_neutral": true,
+      "loop": true
+    },
+    "capture_only": {
+      "stock": true,
+      "neutral": true,
+      "wide_neutral": true,
+      "loop": true
+    },
+    "reuse_capture": {
+      "stock": true,
+      "neutral": true,
+      "wide_neutral": true,
+      "loop": true
+    }
+  },
+  "kernels": {
+    "gdn_original": {
+      "summary": true,
+      "pass": false,
+      "cases": 8,
+      "exit_code": 1
+    },
+    "gdn_fixed_CUDA0_off_off": {
+      "summary": true,
+      "pass": true,
+      "cases": 8,
+      "exit_code": 0
+    },
+    "gdn_fixed_CUDA0_on_off": {
+      "summary": true,
+      "pass": true,
+      "cases": 8,
+      "exit_code": 0
+    },
+    "gdn_fixed_CUDA0_on_on": {
+      "summary": true,
+      "pass": true,
+      "cases": 8,
+      "exit_code": 0
+    },
+    "gdn_fixed_CUDA1_off_off": {
+      "summary": true,
+      "pass": true,
+      "cases": 8,
+      "exit_code": 0
+    },
+    "gdn_fixed_CUDA1_on_off": {
+      "summary": true,
+      "pass": true,
+      "cases": 8,
+      "exit_code": 0
+    },
+    "gdn_fixed_CUDA1_on_on": {
+      "summary": true,
+      "pass": true,
+      "cases": 8,
+      "exit_code": 0
+    },
+    "topk_unfused": {
+      "summary": true,
+      "cases": 96,
+      "trailing_scale": false,
+      "cpu_tolerance_failures": 0,
+      "reference_nonidentical": 0,
+      "exit_code": 0
+    },
+    "topk_original_terminal_crash": {
+      "partial_rows": 4,
+      "last_key": "softmax/1/bias0/norm0/logits_both_disjoint/ordinary",
+      "exit_code": 3221225477
+    },
+    "topk_original_with_tail": {
+      "summary": true,
+      "cases": 96,
+      "trailing_scale": true,
+      "cpu_tolerance_failures": 0,
+      "reference_nonidentical": 8,
+      "exit_code": 0
+    },
+    "topk_fixed_CUDA0": {
+      "summary": true,
+      "cases": 96,
+      "trailing_scale": false,
+      "cpu_tolerance_failures": 0,
+      "reference_nonidentical": 0,
+      "exit_code": 0
+    },
+    "topk_fixed_CUDA1": {
+      "summary": true,
+      "cases": 96,
+      "trailing_scale": false,
+      "cpu_tolerance_failures": 0,
+      "reference_nonidentical": 0,
+      "exit_code": 0
+    },
+    "topk_ties_unfused": {
+      "summary": true,
+      "cases": 48,
+      "trailing_scale": false,
+      "cpu_tolerance_failures": 0,
+      "reference_nonidentical": 0,
+      "exit_code": 0
+    },
+    "topk_ties_fixed": {
+      "summary": true,
+      "cases": 48,
+      "trailing_scale": false,
+      "cpu_tolerance_failures": 0,
+      "reference_nonidentical": 0,
+      "exit_code": 0
+    }
+  },
+  "server": {
+    "context_setting": 261888,
+    "completion_cases": 27,
+    "chat_cases": 3,
+    "all_finite_returned_probabilities": true,
+    "stock_neutral_tokens": {
+      "short_a": true,
+      "prefill_1023": true,
+      "prefill_1025": true,
+      "prefill_4095": true,
+      "prefill_4113": true,
+      "short_b": true,
+      "short_a_repeat": true,
+      "short_a_cached": true,
+      "decode_128": true
+    },
+    "scope": "Prompts up to 4113 tokens; full context capacity reserved, not a 261888-token prompt test.",
+    "integration_cuda_sha256": "dc20c7c5e45000aba0b945d5477bbea418c37bc54252cc3ddf937ce58f01c595",
+    "integration_binary_note": "Same GDN and reduction fixes; final DLL additionally has terminal matcher bounds checks. Kernel and full-vocabulary tests cover the final DLL. Final-server measurements appear in the benchmark section when complete."
+  },
+  "final_probe_counter_lower_bounds": {
+    "gdn_cache_fused": 3,
+    "gdn_cache_live_tail": 3,
+    "topk_fused": 3,
+    "graph_launch": 5120
+  },
+  "server_counter_lower_bounds": {
+    "stock": {
+      "gdn_cache_fused": 1024,
+      "gdn_cache_live_tail": 0,
+      "topk_fused": 1024,
+      "graph_launch": 15104
+    },
+    "neutral": {
+      "gdn_cache_fused": 1024,
+      "gdn_cache_live_tail": 3,
+      "topk_fused": 2048,
+      "graph_launch": 9472
+    },
+    "loop": {
+      "gdn_cache_fused": 1024,
+      "gdn_cache_live_tail": 0,
+      "topk_fused": 2048,
+      "graph_launch": 9472
+    }
+  },
+  "benchmark": {
+    "mode": "Loop 28-31 x4",
+    "baseline": "fusion, graph reuse, CUDA graphs disabled",
+    "optimized": "all three enabled",
+    "repetitions": 3,
+    "tokens_each": [
+      256,
+      256,
+      256
+    ],
+    "baseline_tokens_per_second": [
+      9.834515191375617,
+      9.864778261835355,
+      9.816162523315791
+    ],
+    "optimized_tokens_per_second": [
+      19.963839614740174,
+      20.58265708542634,
+      20.76017914324939
+    ],
+    "baseline_median": 9.834515191375617,
+    "optimized_median": 20.58265708542634,
+    "speedup_ratio": 2.0929000245458274,
+    "speedup_percent": 109.29000245458273,
+    "same_generated_tokens": [
+      true,
+      true,
+      true
+    ],
+    "cuda_sha256": "7ffa83527d7a9bc818788fa14c19c468a9b891b0e4b5053bba6ab8de89eef2bf",
+    "captured_launch_lower_bound": 85504
+  }
+}

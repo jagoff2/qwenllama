@@ -1,0 +1,78 @@
+{
+  "analysis": "Post-hoc descriptive slices; not part of frozen success criterion and no subgroup significance claims",
+  "answer_length_slices": [
+    {
+      "target_digits": 9,
+      "n": 32,
+      "stock_correct": 15,
+      "loop_correct": 15,
+      "wins": 4,
+      "losses": 4
+    },
+    {
+      "target_digits": 10,
+      "n": 160,
+      "stock_correct": 16,
+      "loop_correct": 56,
+      "wins": 45,
+      "losses": 5
+    }
+  ],
+  "example_selection": "First three corrections and first three regressions in frozen task order",
+  "corrections": [
+    {
+      "id": "heldout-integer_product-n5-0001",
+      "a": 46603,
+      "b": 96021,
+      "target": "4474866663",
+      "stock": "4474866063",
+      "loop": "4474866663"
+    },
+    {
+      "id": "heldout-integer_product-n5-0007",
+      "a": 68489,
+      "b": 39471,
+      "target": "2703329319",
+      "stock": "2703329619",
+      "loop": "2703329319"
+    },
+    {
+      "id": "heldout-integer_product-n5-0011",
+      "a": 61549,
+      "b": 52949,
+      "target": "3258958001",
+      "stock": "3258958801",
+      "loop": "3258958001"
+    }
+  ],
+  "regressions": [
+    {
+      "id": "heldout-integer_product-n5-0000",
+      "a": 45169,
+      "b": 86997,
+      "target": "3929567493",
+      "stock": "3929567493",
+      "loop": "3929577493"
+    },
+    {
+      "id": "heldout-integer_product-n5-0016",
+      "a": 11401,
+      "b": 22531,
+      "target": "256875931",
+      "stock": "256875931",
+      "loop": "256876031"
+    },
+    {
+      "id": "heldout-integer_product-n5-0083",
+      "a": 42167,
+      "b": 20413,
+      "target": "860754971",
+      "stock": "860754971",
+      "loop": "860755371"
+    }
+  ],
+  "source_sha256": {
+    "confirmation27_stock.jsonl": "81e6ac12275f3844e37cf8c9b5cbf31177263ccb3f728217f302f1df2619a9a6",
+    "confirmation27_norm28_31x4.jsonl": "ebcdffe0e26c395ca92634c3e181972ef541aab485562daf8dde6481aae6b042"
+  }
+}

@@ -1,0 +1,4 @@
+# Preserve the recorded benchmark files and their byte-level provenance hashes.
+* -text whitespace=cr-at-eol
+*.patch -whitespace
+*.svg -whitespace

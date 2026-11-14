@@ -335,10 +335,8 @@ llama_moe_cache * llama_moe_cache_create(const llama_model & model, llama_moe_st
         layer.map.assign(n_expert, 0);
         layer.score.assign(n_expert, 0);
         layer.seen.assign(n_expert, false);
-        layer.entries.resize(params.slots_per_layer + 1);
         layer.bind.host_slots = layer.map.data();
         layer.bind.n_expert = n_expert;
-        layer.bind.capacity = params.slots_per_layer;
         layer.bind.device = owner->second;
         sources[owner->second].push_back(source);
     }
@@ -347,20 +345,36 @@ llama_moe_cache * llama_moe_cache_create(const llama_model & model, llama_moe_st
         return nullptr;
     }
     llama_moe_plan::cache_plan plan;
+    int min_capacity = 511;
+    int max_capacity = 0;
+    size_t total_experts = 0;
     for (const auto & item : sources) {
-        auto local = llama_moe_plan::plan_cache(item.second, extents.at(item.first), params.slots_per_layer, cache_scratch_bytes);
+        int capacity_limit = 511;
+        for (const auto & source : item.second) {
+            capacity_limit = std::min(capacity_limit, cache->layers[source.il].bind.n_expert - 1);
+        }
+        auto local = params.fit_capacity ?
+                llama_moe_plan::fit_cache(item.second, extents.at(item.first), params.slots_per_layer,
+                                         capacity_limit, cache_scratch_bytes) :
+                llama_moe_plan::plan_cache(item.second, extents.at(item.first), params.slots_per_layer, cache_scratch_bytes);
         if (!local.enabled) {
             LLAMA_LOG_WARN("moe_cache: device %d: %s; using baseline\n", item.first, local.reason.c_str());
             delete cache;
             return nullptr;
         }
         for (auto bank : local.banks) {
+            auto & layer = cache->layers[bank.il];
+            layer.bind.capacity = local.slots_per_layer;
+            layer.entries.resize(local.slots_per_layer + 1);
             bank.extent = int(extent_indices.at(item.first).at(bank.extent));
             plan.banks.push_back(bank);
         }
         plan.bank_bytes += local.bank_bytes;
+        min_capacity = std::min(min_capacity, local.slots_per_layer);
+        max_capacity = std::max(max_capacity, local.slots_per_layer);
+        total_experts += local.banks.size() * local.slots_per_layer;
         LLAMA_LOG_INFO("moe_cache: device %d, %zu layers, %d slots/layer, %.2f MiB banks\n",
-                       item.first, local.banks.size(), params.slots_per_layer, local.bank_bytes / 1048576.0);
+                       item.first, local.banks.size(), local.slots_per_layer, local.bank_bytes / 1048576.0);
     }
     ggml_init_params init{};
     init.mem_size = (16u << 10) + plan.banks.size() * 4 * ggml_tensor_overhead();
@@ -389,7 +403,7 @@ llama_moe_cache * llama_moe_cache_create(const llama_model & model, llama_moe_st
         const auto buft = ggml_backend_buffer_get_type(extent.buffer);
         for (int f = 0; f < 3; ++f) {
             const auto * source = layer.source[f];
-            auto * bank = ggml_new_tensor_3d(cache->context, source->type, source->ne[0], source->ne[1], params.slots_per_layer + 1);
+            auto * bank = ggml_new_tensor_3d(cache->context, source->type, source->ne[0], source->ne[1], layer.bind.capacity + 1);
             ggml_format_name(bank, "fn_cache_bank_%d_%d", bank_plan.il, f);
             void * address = static_cast<char *>(extent.base) + bank_plan.offset + bank_plan.family_offset[f];
             ok = ok && ggml_backend_tensor_alloc(extent.buffer, bank, address) == GGML_STATUS_SUCCESS;
@@ -414,9 +428,9 @@ llama_moe_cache * llama_moe_cache_create(const llama_model & model, llama_moe_st
         delete cache;
         return nullptr;
     }
-    LLAMA_LOG_INFO("moe_cache: %zu devices, %zu layers, %d slots/layer, %zu experts, %.2f MiB banks, %zu MiB scratch\n",
-                   sources.size(), plan.banks.size(), params.slots_per_layer,
-                   plan.banks.size() * params.slots_per_layer, plan.bank_bytes / 1048576.0,
+    LLAMA_LOG_INFO("moe_cache: %zu devices, %zu layers, %d-%d slots/layer, %zu experts, %.2f MiB banks, %zu MiB scratch\n",
+                   sources.size(), plan.banks.size(), min_capacity, max_capacity,
+                   total_experts, plan.bank_bytes / 1048576.0,
                    stream->extents.size() * (cache_scratch_bytes >> 20));
     return cache;
 }

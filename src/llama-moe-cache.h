@@ -17,6 +17,7 @@ struct llama_moe_cache_params {
     int max_rows = 49;
     uint64_t admission_bytes = uint64_t(64) << 20;
     bool multi_device = false;
+    bool fit_capacity = false;
 };
 
 struct llama_moe_cache_layer_bind {

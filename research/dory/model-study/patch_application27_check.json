@@ -1,0 +1,38 @@
+{
+  "passed": true,
+  "base_commit": "6b46b979bea3d7b08e21a9f540d61503c7a84ac9",
+  "scope": "Apply patches to clean base versions of the five affected files; compare resulting source to live implementation. No clean rebuild.",
+  "patch_line_ending_fix": "recurrence_release27.patch is the LF-normalized form of recurrence_cache18.patch, which fails against LF source with its original CRLF context.",
+  "patches": {
+    "baseline_prerequisites.patch": "b1695b02379c5690085eb96848066528c1547c2a6ef13e144c4bf54af43aeda6",
+    "recurrence_cache18.patch": "63f8341812ec13ec4e9cbc67368f706651a3eaeea35c8c51663638dcc868273f",
+    "recurrence_release27.patch": "a5c661f816c52e3199591838fd2fcadc559000876d0d250521dee61bcebf9306"
+  },
+  "files": {
+    "ggml/src/ggml-cuda/vecdotq.cuh": {
+      "patched_sha256": "95e279533eb89ff850f7cf1447e8fec72fe8bd47bd23de67ecf9ca0ea6710094",
+      "live_sha256": "95e279533eb89ff850f7cf1447e8fec72fe8bd47bd23de67ecf9ca0ea6710094",
+      "equal_normalizing_line_endings": true
+    },
+    "src/llama-mmap.h": {
+      "patched_sha256": "60ab25a9b72133ef0aec0fc8e11787b8789e4aa3b699f144e9bd421e8f1b553c",
+      "live_sha256": "60ab25a9b72133ef0aec0fc8e11787b8789e4aa3b699f144e9bd421e8f1b553c",
+      "equal_normalizing_line_endings": true
+    },
+    "ggml/src/ggml-backend.cpp": {
+      "patched_sha256": "47fd23e517c98a615b611fe87d4745fe5555466c1dfcd3c6ef21dcb2db1c8edd",
+      "live_sha256": "11d5811f2843d2697cc738edfc6ec14c7e4e722e53c49568c56c7bc0eb39e763",
+      "equal_normalizing_line_endings": true
+    },
+    "src/models/models.h": {
+      "patched_sha256": "5dd906b7b5146aeec5da3367834a8bf63d3410c6e6d1ecc9db7f865081c7653e",
+      "live_sha256": "176235512af70936efda426ae270f34c49e820eb9d2204ee5dd5b3e206ad34fa",
+      "equal_normalizing_line_endings": true
+    },
+    "src/models/qwen4exp.cpp": {
+      "patched_sha256": "a0d9372f47cb9b06ee7713bac6b14d16cef509056b30a9375a86a92177823499",
+      "live_sha256": "74d611a78bf5f629b912dcc823add2a6a074458739ee79a895ac2c731c4e7d24",
+      "equal_normalizing_line_endings": true
+    }
+  }
+}

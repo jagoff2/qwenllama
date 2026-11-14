@@ -1,0 +1,37 @@
+{
+  "scope": "Publication preparation, no new GPU inference",
+  "primary_numerical_rescore": {
+    "analysis": "Complete reproduction rescore; does not verify historical frozen execution",
+    "n": 192,
+    "stock_correct": 31,
+    "candidate_correct": 71,
+    "wins": 49,
+    "losses": 9,
+    "delta_pp": 20.833333333333336,
+    "mcnemar_two_sided_p": 8.959402428981855e-08,
+    "paired_bootstrap_95ci_pp": [
+      14.0625,
+      28.125
+    ],
+    "stock_mean_seconds": 2.0032184583333335,
+    "candidate_mean_seconds": 2.3742790364583333,
+    "latency_ratio": 1.185232207990795,
+    "source_sha256": {
+      "research\\dory\\model-study\\confirmation27_heldout192.jsonl": "fbe5b0f3071b26decc788c8b4b3b3059ac43484400e77f675befbf6e1103e13f",
+      "research\\dory\\model-study\\confirmation27_stock.jsonl": "81e6ac12275f3844e37cf8c9b5cbf31177263ccb3f728217f302f1df2619a9a6",
+      "research\\dory\\model-study\\confirmation27_norm28_31x4.jsonl": "ebcdffe0e26c395ca92634c3e181972ef541aab485562daf8dde6481aae6b042"
+    }
+  },
+  "model_harness_and_regression_compilation": "passed",
+  "planner_checks": 9607,
+  "planner_failures": 0,
+  "allocation_failure_retry_recovery": "passed",
+  "powershell_syntax_scripts": 8,
+  "launcher_argument_forwarding": "passed with synthetic server stub",
+  "launcher_path_preserved": true,
+  "python_syntax": "passed",
+  "readme_and_reproduction_links": "passed",
+  "model_study_original_artifact_hashes": "passed",
+  "manuscript_method_and_primary_results_review": "passed independent read-only review",
+  "primary_figure_visual_inspection": "passed"
+}

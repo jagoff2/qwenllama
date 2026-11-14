@@ -1,0 +1,52 @@
+{
+  "date": "2026-11-13",
+  "source_base": "97fdd5a3fa0eb4f298280abdc9a833c2be941035",
+  "source_base_branch": "fn-stream-prefill",
+  "inherited_working_tree_patch_sha256": "81d64063478ff36796668821296c2261a6cc3285fa7412cc559354d3ddbd5ea4",
+  "original_launcher_sha256": "4665dd18d45f0639d4080f518cf3c7137a68829fdad4eac5ad4de04ce636340b",
+  "graphs_package_zip_sha256": "dc6fc6fd01fdee7f838984c713c6037753b134be80615d44d65d9d55551d8f1e",
+  "memory_package_zip_sha256": "8b06b157b7f2592fb32e62151ac9edeec5533fee9529e0fcd07f7dab951a27f1",
+  "final_source_sha256": {
+    "ggml/src/ggml-alloc.c": "47a5a37df96f3a61990e89934a7e7100a2d63cd0968f1fca446e2bfa986681d6",
+    "ggml/src/ggml-backend.cpp": "37506af059e6548f929fd275a2d674d32886d96c55c005af7678541948e772c5",
+    "ggml/src/ggml-cuda/CMakeLists.txt": "bdb53615afb2ac241a0d42feaf6c6b03f4cc65d33aaf340174b5f7a834bb541d",
+    "ggml/src/ggml-cuda/ggml-cuda.cu": "be5a526dbe31211393512c4b2880c79f92b77e02cc28dc31fcdd6c85191a3e37",
+    "ggml/src/ggml-cuda/topk-moe.cu": "5ac8383497131201da1ee29f2d14af4704949339953adb78d2d9e613201624b4",
+    "src/llama-context.cpp": "9619ad3c2fdc2ec10467042800581e5378f2e271dd71d712ddd167f811fcbc7f",
+    "src/llama-context.h": "b6ed7fd984e6a3b17ddce57764306168eb8e3e7fd6e49c15b47d1da832dd65ad",
+    "src/llama-moe-cache.cpp": "dcafe69561db90495796a3bc8ffda644c3464566b77988c0b77852ca71a1219b",
+    "src/llama-moe-cache.h": "e5a741ac90e0d35097f10a3a284fae5e72e6e544f0da2f07740f7921df5a71fb",
+    "src/llama-moe-stream-plan.cpp": "ab60ec4d698bc042e2d3ae3575a4e060ea8e02ab64b4a2a9fbef9ff43d7f10a1",
+    "src/llama-moe-stream-plan.h": "3dd566ca809b37e345700a55e5ee98c562448ec1cb7ee99f9f9092feefe21fe0",
+    "src/llama-moe-stream.cpp": "1d2430c543736b8f77e74d0ba446af2ecd2670a6d593bce6c3fc64c248d5d348",
+    "src/llama-moe-stream.h": "369da02ebc3fe0813168d16245e8d189253bdbfed6d4ca6697d885a0840efd8a",
+    "src/models/models.h": "6f33c392baae7f0aac6636bc71e10717d643c663fa236b6ee2b5a4f325560551",
+    "src/models/qwen4exp.cpp": "5690c2308daf1a4042c50e0002bd8b5bb75959a1c9ae980000dcad738eaa3114",
+    "tests/test-moe-stream-plan.cpp": "9d636427b22ae4682338bade17581fdab6f0b64615716c921f059483948e9a9c"
+  },
+  "runtime_hashes": {
+    "llama.dll": "d2c9a0ba581e77159398700a859b9e79a7806568424f44e3c0d419087c221255",
+    "ggml-base.dll": "1f6d3da9bf09a36597a043594e89a977708d79b226de1ee50119cbf99a329593",
+    "ggml-cuda.dll": "7ffa83527d7a9bc818788fa14c19c468a9b891b0e4b5053bba6ab8de89eef2bf"
+  },
+  "publication": "Source changes copied byte-for-byte from the tested isolated worktree. Numerical evidence projected from curated JSON artifacts; diagnostic text and private templates omitted. Reference scripts preserve original local paths. Public launcher adds external path parameters; no new GPU run for publication.",
+  "original_model_efficacy_base": "6b46b979bea3d7b08e21a9f540d61503c7a84ac9",
+  "final_source_lf_sha256": {
+    "ggml/src/ggml-alloc.c": "47a5a37df96f3a61990e89934a7e7100a2d63cd0968f1fca446e2bfa986681d6",
+    "ggml/src/ggml-backend.cpp": "37506af059e6548f929fd275a2d674d32886d96c55c005af7678541948e772c5",
+    "ggml/src/ggml-cuda/CMakeLists.txt": "bdb53615afb2ac241a0d42feaf6c6b03f4cc65d33aaf340174b5f7a834bb541d",
+    "ggml/src/ggml-cuda/ggml-cuda.cu": "be5a526dbe31211393512c4b2880c79f92b77e02cc28dc31fcdd6c85191a3e37",
+    "ggml/src/ggml-cuda/topk-moe.cu": "5ac8383497131201da1ee29f2d14af4704949339953adb78d2d9e613201624b4",
+    "src/llama-context.cpp": "9619ad3c2fdc2ec10467042800581e5378f2e271dd71d712ddd167f811fcbc7f",
+    "src/llama-context.h": "b6ed7fd984e6a3b17ddce57764306168eb8e3e7fd6e49c15b47d1da832dd65ad",
+    "src/llama-moe-cache.cpp": "dcafe69561db90495796a3bc8ffda644c3464566b77988c0b77852ca71a1219b",
+    "src/llama-moe-cache.h": "e5a741ac90e0d35097f10a3a284fae5e72e6e544f0da2f07740f7921df5a71fb",
+    "src/llama-moe-stream-plan.cpp": "ab60ec4d698bc042e2d3ae3575a4e060ea8e02ab64b4a2a9fbef9ff43d7f10a1",
+    "src/llama-moe-stream-plan.h": "3dd566ca809b37e345700a55e5ee98c562448ec1cb7ee99f9f9092feefe21fe0",
+    "src/llama-moe-stream.cpp": "1d2430c543736b8f77e74d0ba446af2ecd2670a6d593bce6c3fc64c248d5d348",
+    "src/llama-moe-stream.h": "369da02ebc3fe0813168d16245e8d189253bdbfed6d4ca6697d885a0840efd8a",
+    "src/models/models.h": "6f33c392baae7f0aac6636bc71e10717d643c663fa236b6ee2b5a4f325560551",
+    "src/models/qwen4exp.cpp": "5690c2308daf1a4042c50e0002bd8b5bb75959a1c9ae980000dcad738eaa3114",
+    "tests/test-moe-stream-plan.cpp": "9d636427b22ae4682338bade17581fdab6f0b64615716c921f059483948e9a9c"
+  }
+}

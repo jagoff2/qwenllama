@@ -1,0 +1,30 @@
+{
+  "frozen_at_utc": "2026-11-13T18:24:43.929598+00:00",
+  "count": 192,
+  "split": "heldout",
+  "generator": "integer_tasks.item(heldout,i,5), i=0..191",
+  "selection": "normalized block28..31, four passes, selected before held-out inference",
+  "primary_metric": "exact complete greedy integer generation with the same generic grammar",
+  "success_rule": {
+    "minimum_absolute_gain_pp": 20,
+    "maximum_exact_two_sided_mcnemar_p": 0.01
+  },
+  "uncertainty": "10000 paired bootstrap draws, seed123456; report wins and losses",
+  "no_optional_stopping": true,
+  "no_parameter_changes_after_inference": true,
+  "model_answer_filtering": false,
+  "answer_length_not_provided": true,
+  "strong_controls": [
+    "original DLL no-fusion parity",
+    "original DLL fused stock",
+    "extra-thinking stock with latency and budget disclosed",
+    "basic regression canaries"
+  ],
+  "tasks_sha256": "fbe5b0f3071b26decc788c8b4b3b3059ac43484400e77f675befbf6e1103e13f",
+  "settings_sha256": "b60984e84be93b894b38027fea8c9169254262a60762b9d87157f20455db5472",
+  "binary_sha256": "26410a4811e5a3f7576595e9c4c2760c1dbcd8342f0360b03c7650353f88035f",
+  "llama_sha256": "eed12efe1ca3a6692c820820f5db70466cb9be4c5ada7e0094beb545ad8dfca9",
+  "runner_sha256": "483659c703080b27ff00a5e437b7dae4ff87b9791f2399f8f6d7b4fa5ede2764",
+  "model_manifest_sha256": "21cb225cd6c7b5765a4d39639d586c22a919dd9c992c7b010eeb348a18a19fb8",
+  "runtime_manifest_sha256": "3fb45eac127f31fb8cd789bcd48122b669991e7ac0a46c3f137fc87a26da753c"
+}

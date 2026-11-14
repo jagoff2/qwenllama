@@ -1,0 +1,26 @@
+[
+  {
+    "name": "Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf",
+    "bytes": 10946752,
+    "sha256": "290a31ca20b74ed2c21b257d378a5678d821ad9fdd8feb1fc52c719761668903",
+    "seconds": 0.012027263641357422
+  },
+  {
+    "name": "Qwen3.8-Flash-Next-UD-Q4_K_XL-00002-of-00004.gguf",
+    "bytes": 49859583296,
+    "sha256": "0ebf70d076e0e98f74dc414a90b92c67d7267876ae524bc7799cf463e27b754b",
+    "seconds": 36.591872453689575
+  },
+  {
+    "name": "Qwen3.8-Flash-Next-UD-Q4_K_XL-00003-of-00004.gguf",
+    "bytes": 49376141664,
+    "sha256": "e9b12f44e13e60d6ef9396449f7b4356b2e2911222b8183a596830c2418db19a",
+    "seconds": 39.07505941390991
+  },
+  {
+    "name": "Qwen3.8-Flash-Next-UD-Q4_K_XL-00004-of-00004.gguf",
+    "bytes": 12087983680,
+    "sha256": "983901b3e47686f56f5fcec87ba8c51e7e2c6996277dd77bc3fc804a1d563da3",
+    "seconds": 8.855230808258057
+  }
+]

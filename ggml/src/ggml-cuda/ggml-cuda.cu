@@ -2762,6 +2762,47 @@ static bool ggml_cuda_should_fuse_rms_norm_mul_rope(const ggml_tensor * rms_norm
     return true;
 }
 
+// Does a tensor alias any part of the GDN snapshot tail? Follow metadata views,
+// including nested/strided views. ggml_nbytes is a conservative byte span.
+static bool ggml_cuda_gdn_tail_alias(const ggml_tensor * tensor, const ggml_tensor * gdn, size_t tail_off) {
+    if (tensor == nullptr) {
+        return false;
+    }
+    const size_t bytes = ggml_nbytes(tensor);
+    size_t offset = 0;
+    while (tensor != gdn && tensor->view_src != nullptr) {
+        offset += tensor->view_offs;
+        tensor = tensor->view_src;
+    }
+    return tensor == gdn && offset < ggml_nbytes(gdn) &&
+           (offset >= tail_off || bytes > tail_off - offset);
+}
+
+static bool ggml_cuda_gdn_tail_is_private(
+        const ggml_cgraph * cgraph, const ggml_tensor * gdn, const ggml_tensor * cpy, size_t tail_off) {
+    // Backend graph views retain the parent graph's visited set. Inspect it so
+    // consumers in later backend splits are included, not just this split.
+    const auto & visited = cgraph->visited_hash_set;
+    for (size_t i = 0; i < visited.size; ++i) {
+        if (!ggml_bitset_get(visited.used, i)) {
+            continue;
+        }
+        const ggml_tensor * node = visited.keys[i];
+        if ((node->flags & GGML_TENSOR_FLAG_OUTPUT) && ggml_cuda_gdn_tail_alias(node, gdn, tail_off)) {
+            return false;
+        }
+        if (node == cpy || ggml_cuda_is_view_or_noop(node)) {
+            continue;
+        }
+        for (const ggml_tensor * src : node->src) {
+            if (ggml_cuda_gdn_tail_alias(src, gdn, tail_off)) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
 // match gated_delta_net + the strided cpy that scatters its state snapshots into the cache
 // (slot i -> rollback group i, slot 0 newest), so the kernel can write them and skip the cpy.
 static int ggml_cuda_try_gdn_cache_fusion(
@@ -2818,6 +2859,22 @@ static int ggml_cuda_try_gdn_cache_fusion(
     if (dst->op != GGML_OP_VIEW || dst->type != GGML_TYPE_F32 || dst->data == nullptr ||
         !std::equal(expected_ne.begin(), expected_ne.end(), dst->ne) ||
         dst->nb[0] != ggml_type_size(GGML_TYPE_F32) || dst->nb[1] != (size_t) ggml_row_size(GGML_TYPE_F32, D)) {
+        return 0;
+    }
+
+    // The fused kernel redirects snapshot writes into the cache and leaves the
+    // output tail unwritten. A later restore/read through any tail alias needs
+    // the ordinary kernel and copy, even when that reader is in another split.
+    if (!ggml_cuda_gdn_tail_is_private(cgraph, gdn, cpy, tail_off)) {
+        static const bool trace_gdn = getenv("GGML_CUDA_OPT_TRACE") != nullptr;
+        static std::atomic<uint64_t> trace_live_count{0};
+        if (trace_gdn) {
+            const uint64_t count = ++trace_live_count;
+            if (count <= 3 || count % 1024 == 0) {
+                GGML_LOG_INFO("cuda_opt_trace: gdn_cache_live_tail=%llu tensor=%s\n",
+                              (unsigned long long) count, gdn->name);
+            }
+        }
         return 0;
     }
 
@@ -2949,7 +3006,7 @@ static bool ggml_cuda_topk_moe_fusion(const struct ggml_cgraph * cgraph, int nod
 
         args.norm = true;
         for (const ggml_op op : norm_ops) {
-            if (nodes[node_idx]->op == op && nodes[node_idx]->src[0] == nodes[node_idx - 1]) {
+            if (node_idx < n_nodes && nodes[node_idx]->op == op && nodes[node_idx]->src[0] == nodes[node_idx - 1]) {
                 node_idx++;
             } else {
                 args.norm = false;
@@ -2958,14 +3015,14 @@ static bool ggml_cuda_topk_moe_fusion(const struct ggml_cgraph * cgraph, int nod
         }
 
         // DIV <- CLAMP, RESHAPE
-        if (nodes[node_idx]->op != GGML_OP_DIV || nodes[node_idx]->src[1] != nodes[node_idx - 1] ||
+        if (node_idx >= n_nodes || nodes[node_idx]->op != GGML_OP_DIV || nodes[node_idx]->src[1] != nodes[node_idx - 1] ||
             nodes[node_idx]->src[0] != nodes[node_idx - 3]) {
             args.norm = false;
             return true;
         }
         node_idx++;
 
-        if (nodes[node_idx]->op != GGML_OP_RESHAPE || nodes[node_idx]->src[0] != nodes[node_idx - 1]) {
+        if (node_idx >= n_nodes || nodes[node_idx]->op != GGML_OP_RESHAPE || nodes[node_idx]->src[0] != nodes[node_idx - 1]) {
             args.norm = false;
             return true;
         }
@@ -2973,7 +3030,7 @@ static bool ggml_cuda_topk_moe_fusion(const struct ggml_cgraph * cgraph, int nod
         node_idx++;
     }
 
-    if (nodes[node_idx]->op == GGML_OP_SCALE && nodes[node_idx]->src[0] == nodes[node_idx - 1]) {
+    if (node_idx < n_nodes && nodes[node_idx]->op == GGML_OP_SCALE && nodes[node_idx]->src[0] == nodes[node_idx - 1]) {
         args.scale = true;
     }
 
@@ -3451,6 +3508,15 @@ static int ggml_cuda_try_fuse(ggml_backend_cuda_context * cuda_ctx, ggml_cgraph 
 
     ggml_tensor * node = cgraph->nodes[i];
 
+    static const std::string disabled_fusion_ops = [] {
+        const char * value = getenv("GGML_CUDA_DISABLE_FUSION_OPS");
+        return value ? std::string(",") + value + "," : std::string();
+    }();
+    if (!disabled_fusion_ops.empty() &&
+        disabled_fusion_ops.find(std::string(",") + ggml_op_name(node->op) + ",") != std::string::npos) {
+        return 0;
+    }
+
     if (node->op == GGML_OP_MUL) {
         ggml_cuda_moe_weighted_reduction_match match;
         if (ggml_cuda_match_moe_weighted_reduction(cgraph, i, match)) {
@@ -3464,10 +3530,23 @@ static int ggml_cuda_try_fuse(ggml_backend_cuda_context * cuda_ctx, ggml_cgraph 
     }
 
     // gated_delta_net -> cpy: scatter recurrent-state snapshots into the cache
-    if (node->op == GGML_OP_GATED_DELTA_NET) {
+    static const bool disable_gdn_cache_fusion = [] {
+        const char * value = getenv("GGML_CUDA_DISABLE_GDN_CACHE_FUSION");
+        return value && std::atoi(value) != 0;
+    }();
+    if (node->op == GGML_OP_GATED_DELTA_NET && !disable_gdn_cache_fusion) {
         ggml_cuda_gated_delta_net_fused_cache fused_state_cpy;
         const int nodes_to_skip = ggml_cuda_try_gdn_cache_fusion(cgraph, i, fused_state_cpy);
         if (nodes_to_skip > 0) {
+            static const bool trace_gdn = getenv("GGML_CUDA_OPT_TRACE") != nullptr;
+            static std::atomic<uint64_t> trace_gdn_count{0};
+            if (trace_gdn) {
+                const uint64_t count = ++trace_gdn_count;
+                if (count <= 3 || count % 1024 == 0) {
+                    GGML_LOG_INFO("cuda_opt_trace: gdn_cache_fused=%llu tensor=%s\n",
+                                  (unsigned long long) count, node->name);
+                }
+            }
 #ifdef GGML_CUDA_DEBUG
             GGML_LOG_INFO("%s: fused gated_delta_net snapshot copies for %s (skipped %d nodes)\n",
                           __func__, node->name, nodes_to_skip);
@@ -3478,8 +3557,9 @@ static int ggml_cuda_try_fuse(ggml_backend_cuda_context * cuda_ctx, ggml_cgraph 
     }
 
     //topk-moe
-    if (cgraph->nodes[i]->op == GGML_OP_UNARY || cgraph->nodes[i]->op == GGML_OP_SOFT_MAX ||
-            cgraph->nodes[i]->op == GGML_OP_ARGSORT) {
+    static const bool disable_topk_fusion = getenv("GGML_CUDA_DISABLE_TOPK_FUSION") != nullptr;
+    if (!disable_topk_fusion && (cgraph->nodes[i]->op == GGML_OP_UNARY || cgraph->nodes[i]->op == GGML_OP_SOFT_MAX ||
+            cgraph->nodes[i]->op == GGML_OP_ARGSORT)) {
         ggml_cuda_topk_moe_args args;
         const bool              can_fuse = ggml_cuda_topk_moe_fusion(cgraph, i, args);
         std::vector<ggml_op>    ops;
@@ -3531,6 +3611,15 @@ static int ggml_cuda_try_fuse(ggml_backend_cuda_context * cuda_ctx, ggml_cgraph 
                 if (ggml_can_fuse_subgraph(cgraph, i, ops.size(), ops.data(), out_nodes, 2) &&
                         ggml_cuda_should_use_topk_moe(node, logits, weights, ids) &&
                         ggml_cuda_check_fusion_memory_ranges(cgraph, i, ops.size(), out_nodes, 2, /*is_topk_moe=*/true)) {
+                    static const bool trace_topk = getenv("GGML_CUDA_OPT_TRACE") != nullptr;
+                    static std::atomic<uint64_t> trace_topk_count{0};
+                    if (trace_topk) {
+                        const uint64_t count = ++trace_topk_count;
+                        if (count <= 3 || count % 1024 == 0) {
+                            GGML_LOG_INFO("cuda_opt_trace: topk_fused=%llu tensor=%s\n",
+                                          (unsigned long long) count, node->name);
+                        }
+                    }
                     ggml_cuda_op_topk_moe(*cuda_ctx, logits, weights, ids, clamp, scale, bias, args);
                     return ops.size() - 1;
                 }
@@ -4406,6 +4495,15 @@ static void ggml_cuda_graph_evaluate_and_capture(ggml_backend_cuda_context * cud
         }
         // Launch graph
         CUDA_CHECK(cudaGraphLaunch(graph->instance, cuda_ctx->stream()));
+        static const bool trace_capture = getenv("GGML_CUDA_OPT_TRACE") != nullptr;
+        static std::atomic<uint64_t> trace_launch_count{0};
+        if (trace_capture) {
+            const uint64_t count = ++trace_launch_count;
+            if (count <= 3 || count % 256 == 0) {
+                GGML_LOG_INFO("cuda_opt_trace: graph_launch=%llu device=%d update=%d\n",
+                              (unsigned long long) count, cuda_ctx->device, (int) cuda_graph_update_required);
+            }
+        }
 #else
         GGML_UNUSED(graph_key);
         graph_evaluated_or_captured = true;

@@ -1,0 +1,114 @@
+{
+  "audit": "independent offline primary confirmation and release-claim review",
+  "created_utc": "2026-11-13T19:01:56.301433+00:00",
+  "conclusion": "Primary confirmation independently verified; no primary scoring, leakage, overlap, or frozen-provenance blocker found.",
+  "primary": {
+    "n": 192,
+    "baseline_correct": 31,
+    "candidate_correct": 71,
+    "wins": 49,
+    "losses": 9,
+    "both_correct": 22,
+    "delta_pp": 20.833333333333336,
+    "exact_two_sided_mcnemar_p": 8.959402428981855e-08,
+    "paired_bootstrap_95ci_pp": [
+      14.0625,
+      28.125
+    ],
+    "bootstrap_draws": 10000,
+    "bootstrap_seed": 123456,
+    "baseline_mean_seconds": 2.0032184583333335,
+    "candidate_mean_seconds": 2.3742790364583333,
+    "ratio_of_means": 1.185232207990795,
+    "predeclared_point_estimate_and_p_criterion_met": true
+  },
+  "integrity": {
+    "unique_rows_per_arm": 192,
+    "exact_task_and_prompt_pairing": true,
+    "all_outputs_grammar_valid": true,
+    "all_outputs_eog_complete": true,
+    "no_truncation": true,
+    "native_integer_and_independent_decimal_oracles_agree": true,
+    "heldout_generator_regenerated_cases": 192,
+    "checked_development_unique_operand_pairs": 544,
+    "checked_development_unique_task_ids": 544,
+    "checked_development_structured_files": 186,
+    "development_operand_pair_overlap": 0,
+    "malformed_development_structured_rows": 0,
+    "frozen_runtime_files_verified": 33,
+    "supplemental_helpers_verified": 8,
+    "recorded_score_input_hashes_verified": true,
+    "model_weight_bytes_rehashed": false
+  },
+  "neutral_controls": {
+    "records": 2,
+    "ids": [
+      "heldout-integer_product-n5-0000",
+      "heldout-integer_product-n5-0191"
+    ],
+    "passed_flag_independently_checked": true,
+    "all_expected_result_fields_equal_except_seconds": true,
+    "generated_ids_initial_full_vocab_fingerprint_state_size_state_fingerprint_equal": true,
+    "serialized_state_bytes_each": 119833564,
+    "expected_outputs_match_primary_stock_first_and_last": true,
+    "control_configuration_source": "Frozen paired_generation.py identity(): beta=1 and cache=1; control rows themselves do not serialize the config."
+  },
+  "documentation": {
+    "development_table_rows_independently_verified": 22,
+    "material_primary_overstatement_found": false,
+    "reviewed": [
+      "METHOD.md",
+      "DEVELOPMENT.md",
+      "build_release27.py",
+      "reproduce_recurrence.py"
+    ]
+  },
+  "findings": [
+    {
+      "id": "F1",
+      "severity": "statistical clarification",
+      "blocks_primary": false,
+      "source": "build_release27.py:61",
+      "finding": "The observed gain passes the frozen >=20-point criterion, but the paired interval lower bound is 14.0625 points; the p-value tests zero paired improvement.",
+      "specific_fix": "Optionally state explicitly that passing the point-estimate criterion does not establish a population improvement of at least 20 percentage points."
+    },
+    {
+      "id": "F2",
+      "severity": "reproduction provenance hardening",
+      "blocks_primary": false,
+      "source": "reproduce_recurrence.py:57-65",
+      "finding": "The reproducer records the first GGUF shard path/size and runtime hashes, but does not hash or verify all model shards against model_hashes.json.",
+      "specific_fix": "Add an optional full-shard manifest verification step or explicit instructions to verify every supplied shard before claiming same-checkpoint reproduction; record its result in the reproduction manifest."
+    },
+    {
+      "id": "F3",
+      "severity": "release integrity hardening",
+      "blocks_primary": false,
+      "source": "build_release27.py:18-28",
+      "finding": "The release builder gates on saved summary booleans and control passed flags. It does not itself bind copied raw data to score input hashes or recompute neutral payload equality. Current primary artifacts were independently verified here.",
+      "specific_fix": "Before packaging, reverify primary/secondary score input hashes and compare control payload fingerprints/IDs/state sizes directly; retain the current gates requiring completed external controls."
+    }
+  ],
+  "scope_limits": [
+    "External original-parity, fused, and thought confirmation controls were still running when this audit was requested and were not rescored here.",
+    "The evidence is limited to the documented quantized checkpoint, closed-thought prompt, generic integer grammar, short-response condition, and five-digit operands ending in 1, 3, 7, or 9.",
+    "Filesystem hashes support artifact consistency; they are not independent proof of historical execution timing or absence of undisclosed runs.",
+    "No inference, runtime writes, frozen-file edits, stderr reads, or prior-chat/log access occurred."
+  ],
+  "source_sha256": {
+    "confirmation27_design.json": "026e6d56b4d5b6e3dc3213bc1578ff455d26a3489c76b100994c5b1e8e583467",
+    "confirmation27_heldout192.jsonl": "fbe5b0f3071b26decc788c8b4b3b3059ac43484400e77f675befbf6e1103e13f",
+    "confirmation27_settings.json": "b60984e84be93b894b38027fea8c9169254262a60762b9d87157f20455db5472",
+    "confirmation27_manifest.json": "315d879ec86525493898ce0baa98caac65a24b7f4ddd15aee7811ab20d002667",
+    "confirmation27_stock.jsonl": "81e6ac12275f3844e37cf8c9b5cbf31177263ccb3f728217f302f1df2619a9a6",
+    "confirmation27_norm28_31x4.jsonl": "ebcdffe0e26c395ca92634c3e181972ef541aab485562daf8dde6481aae6b042",
+    "confirmation27_controls.jsonl": "177e0fdeeaa59982815e246dbc002250bb9744cf0da0c4f1de35eddd00122a6a",
+    "confirmation27_score.json": "e5fd0e9725c04e8ddb1fc37a9cffa697041173c403a1524919694f40806d1316",
+    "confirmation27_runtime_manifest.json": "3fb45eac127f31fb8cd789bcd48122b669991e7ac0a46c3f137fc87a26da753c",
+    "confirmation27_helper_manifest.json": "ab9027cf106c73ae1f31cc4257c8bc0101c5611702cc81caea446d15a8c0b514",
+    "METHOD.md": "74e245f1e8de98029440574061271adf1aa235eaa1bad026a4fe4ab5b37325cd",
+    "DEVELOPMENT.md": "c8c897c786dc5755f773c9d5aefb70f029919faae3e84a45bce00e2539ad1251",
+    "build_release27.py": "52b3becc46d5b0363eae222953a7f281ae93e9a563e4233e5229b55151bc355c",
+    "reproduce_recurrence.py": "7ff0b375a288fa4b728f9fe026e6f47b5534a3588db17314073f3a02904f99eb"
+  }
+}

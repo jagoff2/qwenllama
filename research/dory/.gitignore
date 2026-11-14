@@ -1,0 +1,5 @@
+out/
+__pycache__/
+*.f32
+*.current-stdout.txt
+*.current-stderr.txt

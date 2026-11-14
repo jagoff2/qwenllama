@@ -1,0 +1,70 @@
+{
+  "baseline": "regression26_stock.jsonl",
+  "results": [
+    {
+      "file": "regression26_norm28_31x4.jsonl",
+      "paired": {
+        "n": 40,
+        "baseline_correct": 40,
+        "candidate_correct": 40,
+        "wins": 0,
+        "losses": 0,
+        "delta_pp": 0.0,
+        "mcnemar_two_sided_p": 1.0,
+        "paired_bootstrap_95ci_pp": [
+          0.0,
+          0.0
+        ]
+      },
+      "timing": {
+        "baseline_mean_s": 0.93784422,
+        "candidate_mean_s": 1.131182125,
+        "baseline_median_s": 0.91286405,
+        "candidate_median_s": 1.1141085,
+        "ratio_of_means": 1.206151406467057,
+        "interleaved": true
+      },
+      "subgroups": [
+        {
+          "family": "basic_canary",
+          "difficulty": "choice",
+          "paired": {
+            "n": 32,
+            "baseline_correct": 32,
+            "candidate_correct": 32,
+            "wins": 0,
+            "losses": 0,
+            "delta_pp": 0.0,
+            "mcnemar_two_sided_p": 1.0,
+            "paired_bootstrap_95ci_pp": [
+              0.0,
+              0.0
+            ]
+          }
+        },
+        {
+          "family": "basic_canary",
+          "difficulty": "free_word",
+          "paired": {
+            "n": 8,
+            "baseline_correct": 8,
+            "candidate_correct": 8,
+            "wins": 0,
+            "losses": 0,
+            "delta_pp": 0.0,
+            "mcnemar_two_sided_p": 1.0,
+            "paired_bootstrap_95ci_pp": [
+              0.0,
+              0.0
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "warning": "Development comparisons are exploratory and unadjusted for configuration selection; they do not establish held-out efficacy.",
+  "sha256": {
+    "regression26_stock.jsonl": "7e849bc053d8108ff43fe44378cc93d3e0efccae9e2f8f1ddec7199a1a640a02",
+    "regression26_norm28_31x4.jsonl": "d4c159d1b5e26bd1fa91172576900b964713d0f4f3bfb85fed066023500e0411"
+  }
+}

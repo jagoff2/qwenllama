@@ -1,0 +1,49 @@
+{
+  "tasks_sha256": "fbe5b0f3071b26decc788c8b4b3b3059ac43484400e77f675befbf6e1103e13f",
+  "settings_sha256": "b60984e84be93b894b38027fea8c9169254262a60762b9d87157f20455db5472",
+  "binary_sha256": "26410a4811e5a3f7576595e9c4c2760c1dbcd8342f0360b03c7650353f88035f",
+  "llama_sha256": "eed12efe1ca3a6692c820820f5db70466cb9be4c5ada7e0094beb545ad8dfca9",
+  "runner_sha256": "483659c703080b27ff00a5e437b7dae4ff87b9791f2399f8f6d7b4fa5ede2764",
+  "settings": [
+    {
+      "name": "stock",
+      "config": [
+        -1,
+        -1,
+        1,
+        1,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "name": "norm28_31x4",
+      "config": [
+        28,
+        31,
+        4,
+        1,
+        0,
+        0,
+        2,
+        0,
+        0,
+        0
+      ]
+    }
+  ],
+  "count": 192,
+  "exact_generation": true,
+  "teacher_forcing": false,
+  "fresh_context": true,
+  "cuda_fusion": false,
+  "cuda_graphs": false,
+  "graph_reuse": false,
+  "arm_order": "independently shuffled per task with fixed seed paired-generation-v1",
+  "warmup": "one unscored easy product per arm",
+  "split": [
+    "heldout"
+  ],
+  "heldout_design_sha256": "026e6d56b4d5b6e3dc3213bc1578ff455d26a3489c76b100994c5b1e8e583467"
+}

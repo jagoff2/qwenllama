@@ -333,8 +333,14 @@ static void test_budget_units(void) {
     CHECK(sp.budget_bytes == 4096 * mib, "4096 MiB must convert exactly once");
     CHECK(arena_budget(sp.budget_bytes, 8192 * mib, 2048 * mib) == 4096 * mib, "explicit budget");
     CHECK(arena_budget(sp.budget_bytes, 3072 * mib, 2048 * mib) == 3072 * mib, "explicit budget capped by free VRAM");
+    CHECK(arena_budget(sp.budget_bytes, 3072 * mib, 2048 * mib, 1024 * mib) == 2048 * mib, "explicit budget preserves runtime headroom");
+    CHECK(arena_budget(sp.budget_bytes, 2058 * mib, 2048 * mib, 1024 * mib) == 1034 * mib, "reported OOM layout cannot consume the runtime reserve");
+    CHECK(arena_budget(sp.budget_bytes, 1024 * mib, 2048 * mib, 1024 * mib) == 0, "explicit reserve exhausts available memory");
+    CHECK(arena_budget(sp.budget_bytes, 512 * mib, 2048 * mib, 1024 * mib) == 0, "explicit reserve must not underflow");
     sp.set_budget_mib(0);
     CHECK(arena_budget(sp.budget_bytes, 8192 * mib, 2048 * mib) == 6144 * mib, "auto budget reserves headroom");
+    CHECK(arena_budget(sp.budget_bytes, 8192 * mib, 2048 * mib, 1024 * mib) == 6144 * mib, "minimum reserve does not weaken auto headroom");
+    CHECK(arena_budget(sp.budget_bytes, 8192 * mib, 2048 * mib, 3072 * mib) == 5120 * mib, "auto uses the larger requested reserve");
     CHECK(arena_budget(sp.budget_bytes, 2048 * mib, 2048 * mib) == 0, "exhausted auto budget is zero");
     CHECK(arena_budget(sp.budget_bytes, 1024 * mib, 2048 * mib) == 0, "auto reserve must not underflow");
     sp.set_budget_mib(std::numeric_limits<uint32_t>::max());
@@ -363,6 +369,34 @@ static void test_descriptor_capacity(void) {
         CHECK(ggml_new_tensor_3d(ctx, GGML_TYPE_F32, 4, 4, 4) != nullptr, "descriptor %d fits", i);
     }
     ggml_free(ctx);
+}
+
+static void test_arena_slot_payload(void) {
+    const uint64_t mib = uint64_t(1) << 20;
+    const uint64_t overhead = 16 * mib;
+    CHECK(arena_slot_payload(4096 * mib, 1950 * mib, 2, overhead) == 2032 * mib,
+          "slot payload must account for allocation padding");
+    CHECK(arena_slot_payload(8192 * mib, 1950 * mib, 2, overhead) == 4080 * mib,
+          "larger device budget must produce larger slot payloads");
+    CHECK(arena_slot_payload(4096 * mib - 1, 1950 * mib, 2, overhead) == 2032 * mib - 512,
+          "slot payload must round down without exceeding the device budget");
+    CHECK(arena_slot_payload(2 * (1950 * mib + overhead), 1950 * mib, 2, overhead) == 1950 * mib,
+          "minimum image must fit at the exact physical allocation boundary");
+    CHECK(arena_slot_payload(2 * (1950 * mib + overhead) - 1, 1950 * mib, 2, overhead) == 0,
+          "one byte below the minimum image allocation must fail");
+    CHECK(arena_slot_payload(32 * mib, 1, 2, overhead) == 0, "padding-only budget rejected");
+    CHECK(arena_slot_payload(0, 1, 2, overhead) == 0, "zero budget rejected");
+    CHECK(arena_slot_payload(4096 * mib, 0, 2, overhead) == 0, "zero image rejected");
+    CHECK(arena_slot_payload(4096 * mib, 1, 0, overhead) == 0, "zero slot count rejected");
+    CHECK(arena_slot_payload(4096 * mib, 1, -1, overhead) == 0, "negative slot count rejected");
+    CHECK(arena_slot_payload(4096 * mib, 1, 2, overhead, 0) == 0, "zero alignment rejected");
+    CHECK(arena_slot_payload(4096 * mib, 1, 2, overhead, 3) == 0, "non-power-of-two alignment rejected");
+    CHECK(arena_slot_payload(UINT64_MAX, 1, 1, UINT64_MAX) == 0, "padding subtraction must not underflow");
+    CHECK(arena_slot_payload(UINT64_MAX, 1, 1, 0) == UINT64_MAX - 511,
+          "large allocation arithmetic must not overflow");
+    const uint64_t payload = arena_slot_payload(UINT64_MAX, 1, 3, overhead);
+    CHECK(payload > 0 && payload <= UINT64_MAX / 3 - overhead && payload % 512 == 0,
+          "multiple slots must remain aligned and within a 64-bit budget");
 }
 
 static void test_unique_experts(void) {
@@ -602,6 +636,10 @@ static void test_cache_layout() {
     }
     const auto repeat = plan_cache(layers, extents, 27, 32 * mib);
     CHECK(repeat.extent_used == plan.extent_used, "cache packing must be deterministic");
+    const auto fitted = fit_cache(layers, extents, 27, 511, 32 * mib);
+    CHECK(fitted.enabled && fitted.slots_per_layer == 27, "fitting original pools must retain 27 slots");
+    CHECK(fitted.bank_bytes == plan.bank_bytes && fitted.extent_used == plan.extent_used,
+          "fitted original cache must retain the fixed planner's exact layout");
     CHECK(plan_cache(layers, extents, 26, 32 * mib).enabled, "26-slot fallback must fit");
     CHECK(!plan_cache(layers, extents, 28, 32 * mib).enabled, "28 slots must exceed existing pool");
     CHECK(!plan_cache(layers, {32 * mib}, 27, 32 * mib).enabled, "scratch cannot consume whole extent");
@@ -618,6 +656,59 @@ static void test_cache_layout() {
     CHECK(!cache_admit(UINT32_MAX, UINT32_MAX, false), "score threshold must not overflow");
 }
 
+static void test_cache_capacity_fit() {
+    cache_layer layer;
+    layer.il = 7;
+    layer.expert_bytes[0] = layer.expert_bytes[1] = layer.expert_bytes[2] = 512;
+    const std::vector<cache_layer> layers = { layer };
+    const uint64_t expert_bytes = 3 * 512;
+    const uint64_t scratch = 1024;
+    const std::vector<uint64_t> gpu0 = { 100 * expert_bytes + scratch };
+    const std::vector<uint64_t> gpu1 = { 60 * expert_bytes + scratch };
+
+    // Device-local fitting must use each device's own extents rather than the smaller pool.
+    const auto fit0 = fit_cache(layers, gpu0, 44, 511, scratch);
+    const auto fit1 = fit_cache(layers, gpu1, 44, 511, scratch);
+    CHECK(fit0.enabled && fit0.slots_per_layer == 99, "larger device must fit 99 cached experts plus dummy");
+    CHECK(fit1.enabled && fit1.slots_per_layer == 59, "smaller device must independently fit 59 cached experts plus dummy");
+    CHECK(fit0.bank_bytes == gpu0[0] - scratch && fit1.bank_bytes == gpu1[0] - scratch,
+          "fitting must retain per-extent scratch");
+    const auto repeat = fit_cache(layers, gpu0, 44, 511, scratch);
+    CHECK(repeat.slots_per_layer == fit0.slots_per_layer && repeat.extent_used == fit0.extent_used,
+          "capacity search must be deterministic");
+
+    const auto capped = fit_cache(layers, gpu0, 44, 80, scratch);
+    CHECK(capped.enabled && capped.slots_per_layer == 80, "model expert limit must cap available capacity");
+    const auto bounded = fit_cache(layers, { 1024 * expert_bytes + scratch }, 44, 1023, scratch);
+    CHECK(bounded.enabled && bounded.slots_per_layer == 511, "capacity must never exceed 511");
+    CHECK(!fit_cache(layers, { 44 * expert_bytes + scratch }, 44, 511, scratch).enabled,
+          "minimum capacity must not be silently reduced to fit");
+    CHECK(!fit_cache(layers, gpu0, 44, 43, scratch).enabled, "reversed capacity range rejected");
+    CHECK(!fit_cache(layers, gpu0, 0, 80, scratch).enabled, "zero minimum rejected");
+    CHECK(!fit_cache(layers, gpu0, 512, 1023, scratch).enabled, "minimum above capacity ceiling rejected");
+    CHECK(!fit_cache(layers, { scratch }, 44, 511, scratch).enabled, "scratch-only extent rejected");
+    CHECK(!fit_cache(layers, {}, 44, 511, scratch).enabled, "missing extents rejected");
+
+    const auto original = plan_cache(layers, gpu0, 44, scratch);
+    const auto fixed = fit_cache(layers, gpu0, 44, 44, scratch);
+    CHECK(fixed.enabled && fixed.slots_per_layer == original.slots_per_layer &&
+          fixed.bank_bytes == original.bank_bytes && fixed.extent_used == original.extent_used,
+          "a fixed fitting range must preserve the original planner result");
+    CHECK(fixed.banks.size() == original.banks.size(), "fixed fitting bank count");
+    if (!fixed.banks.empty() && !original.banks.empty()) {
+        const auto & a = fixed.banks[0];
+        const auto & b = original.banks[0];
+        CHECK(a.il == b.il && a.extent == b.extent && a.offset == b.offset && a.bytes == b.bytes &&
+              std::equal(a.family_offset, a.family_offset + 3, b.family_offset),
+              "fixed fitting must preserve all bank offsets and family ranges");
+    }
+
+    // A complete bank cannot span extents even when their combined free space would suffice.
+    const auto fragmented = fit_cache(layers, { 44 * expert_bytes + scratch, 44 * expert_bytes + scratch },
+                                     44, 511, scratch);
+    CHECK(!fragmented.enabled, "fitting must respect whole-bank placement in each extent");
+}
+
 int main(void) {
     test_rings();
     test_plan_single_device();
@@ -626,11 +717,13 @@ int main(void) {
     test_clamp();
     test_source_eligibility();
     test_budget_units();
+    test_arena_slot_payload();
     test_descriptor_capacity();
     test_unique_experts();
     test_layout();
     test_place_arena();
     test_cache_layout();
+    test_cache_capacity_fit();
 
     std::printf("test-moe-stream-plan: %d checks, %d failures\n", g_checks, g_fail);
     return g_fail == 0 ? 0 : 1;

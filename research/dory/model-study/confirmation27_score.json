@@ -1,0 +1,97 @@
+{
+  "analysis": "frozen held-out confirmation",
+  "confirmation_success": true,
+  "success_rule": {
+    "delta_pp": ">=20",
+    "exact_two_sided_mcnemar_p": "<0.01"
+  },
+  "primary": {
+    "n": 192,
+    "baseline": {
+      "correct": 31,
+      "accuracy_percent": 16.145833333333332,
+      "valid": 192,
+      "eog_completed": 192,
+      "budget_exhausted": 0,
+      "mean_seconds": 2.0032184583333335,
+      "median_seconds": 2.00228795
+    },
+    "candidate": {
+      "correct": 71,
+      "accuracy_percent": 36.979166666666664,
+      "valid": 192,
+      "eog_completed": 192,
+      "budget_exhausted": 0,
+      "mean_seconds": 2.3742790364583333,
+      "median_seconds": 2.3669192
+    },
+    "wins": 49,
+    "losses": 9,
+    "both_correct": 22,
+    "delta_pp": 20.833333333333336,
+    "mcnemar_two_sided_p": 8.959402428981855e-08,
+    "paired_bootstrap_95ci_pp": [
+      14.0625,
+      28.125
+    ],
+    "bootstrap_draws": 10000,
+    "bootstrap_seed": 123456,
+    "timing": {
+      "interleaved": true,
+      "ratio_of_means": 1.185232207990795,
+      "mean_paired_delta_seconds": 0.37106057812500004,
+      "interpretation": "randomized within-task order",
+      "scope": "context creation plus inference; excludes model load and teardown",
+      "first_arm_counts": {
+        "stock": 90,
+        "norm28_31x4": 102
+      }
+    },
+    "baseline_name": "stock",
+    "candidate_name": "norm28_31x4"
+  },
+  "frozen_provenance": {
+    "runtime_verified": true,
+    "runtime_files_verified": 33,
+    "runtime_manifest_sha256": "3fb45eac127f31fb8cd789bcd48122b669991e7ac0a46c3f137fc87a26da753c",
+    "helper_files_verified": 8,
+    "helper_manifest_sha256": "ab9027cf106c73ae1f31cc4257c8bc0101c5611702cc81caea446d15a8c0b514",
+    "model_manifest_verified": true,
+    "model_weight_files_rehashed": false
+  },
+  "numpy_version": "2.2.6",
+  "limitations": [
+    "Snapshot hashes verify recorded artifacts, not historical execution.",
+    "Missing EOG completion is a validation failure, not a changed accuracy rule."
+  ],
+  "hashes": {
+    "design": {
+      "path": "G:\\qwenllamaMTP\\experiments\\dory_20261113\\confirmation27_design.json",
+      "sha256": "026e6d56b4d5b6e3dc3213bc1578ff455d26a3489c76b100994c5b1e8e583467"
+    },
+    "tasks": {
+      "path": "G:\\qwenllamaMTP\\experiments\\dory_20261113\\confirmation27_heldout192.jsonl",
+      "sha256": "fbe5b0f3071b26decc788c8b4b3b3059ac43484400e77f675befbf6e1103e13f"
+    },
+    "settings": {
+      "path": "G:\\qwenllamaMTP\\experiments\\dory_20261113\\confirmation27_settings.json",
+      "sha256": "b60984e84be93b894b38027fea8c9169254262a60762b9d87157f20455db5472"
+    },
+    "run_manifest": {
+      "path": "G:\\qwenllamaMTP\\experiments\\dory_20261113\\confirmation27_manifest.json",
+      "sha256": "315d879ec86525493898ce0baa98caac65a24b7f4ddd15aee7811ab20d002667"
+    },
+    "baseline": {
+      "path": "G:\\qwenllamaMTP\\experiments\\dory_20261113\\confirmation27_stock.jsonl",
+      "sha256": "81e6ac12275f3844e37cf8c9b5cbf31177263ccb3f728217f302f1df2619a9a6"
+    },
+    "candidate": {
+      "path": "G:\\qwenllamaMTP\\experiments\\dory_20261113\\confirmation27_norm28_31x4.jsonl",
+      "sha256": "ebcdffe0e26c395ca92634c3e181972ef541aab485562daf8dde6481aae6b042"
+    },
+    "scorer": {
+      "path": "G:\\qwenllamaMTP\\experiments\\dory_20261113\\confirmation27_score.py",
+      "sha256": "ff63216cfed6b4cdbd5f7bd87d7e115a127a6a65f5de61e903d2428e733910a8"
+    }
+  }
+}

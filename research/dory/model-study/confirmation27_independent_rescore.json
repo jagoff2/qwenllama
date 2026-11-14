@@ -1,0 +1,22 @@
+{
+  "analysis": "Complete reproduction rescore; does not verify historical frozen execution",
+  "n": 192,
+  "stock_correct": 31,
+  "candidate_correct": 71,
+  "wins": 49,
+  "losses": 9,
+  "delta_pp": 20.833333333333336,
+  "mcnemar_two_sided_p": 8.959402428981855e-08,
+  "paired_bootstrap_95ci_pp": [
+    14.0625,
+    28.125
+  ],
+  "stock_mean_seconds": 2.0032184583333335,
+  "candidate_mean_seconds": 2.3742790364583333,
+  "latency_ratio": 1.185232207990795,
+  "source_sha256": {
+    "confirmation27_heldout192.jsonl": "fbe5b0f3071b26decc788c8b4b3b3059ac43484400e77f675befbf6e1103e13f",
+    "confirmation27_stock.jsonl": "81e6ac12275f3844e37cf8c9b5cbf31177263ccb3f728217f302f1df2619a9a6",
+    "confirmation27_norm28_31x4.jsonl": "ebcdffe0e26c395ca92634c3e181972ef541aab485562daf8dde6481aae6b042"
+  }
+}

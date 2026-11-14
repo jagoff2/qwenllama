@@ -1,0 +1,53 @@
+{
+  "baseline": "replication22_stock.jsonl",
+  "results": [
+    {
+      "file": "replication22_norm28_31x4.jsonl",
+      "paired": {
+        "n": 96,
+        "baseline_correct": 22,
+        "candidate_correct": 44,
+        "wins": 25,
+        "losses": 3,
+        "delta_pp": 22.916666666666664,
+        "mcnemar_two_sided_p": 2.744048833847046e-05,
+        "paired_bootstrap_95ci_pp": [
+          13.541666666666666,
+          32.29166666666667
+        ]
+      },
+      "timing": {
+        "baseline_mean_s": 2.0355781447916668,
+        "candidate_mean_s": 2.4276440708333333,
+        "baseline_median_s": 2.0349601,
+        "candidate_median_s": 2.4307945,
+        "ratio_of_means": 1.1926066690413366,
+        "interleaved": true
+      },
+      "subgroups": [
+        {
+          "family": "integer_product",
+          "difficulty": "5",
+          "paired": {
+            "n": 96,
+            "baseline_correct": 22,
+            "candidate_correct": 44,
+            "wins": 25,
+            "losses": 3,
+            "delta_pp": 22.916666666666664,
+            "mcnemar_two_sided_p": 2.744048833847046e-05,
+            "paired_bootstrap_95ci_pp": [
+              13.541666666666666,
+              32.29166666666667
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "warning": "Development comparisons are exploratory and unadjusted for configuration selection; they do not establish held-out efficacy.",
+  "sha256": {
+    "replication22_stock.jsonl": "d8a65b07cf17aa7cdfb5310ccb160dd3f5efe4f6dad124de8e6d85ee94cb1115",
+    "replication22_norm28_31x4.jsonl": "7466817b607dc0789346c2d0a5f6236f8a96347b709a35d2cda835df5bc06543"
+  }
+}

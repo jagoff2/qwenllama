@@ -30,7 +30,9 @@ struct llama_moe_stream_params {
     int64_t  min_tokens  = 1024;   // only stream micro-batches at least this large
     int      pin_host    = 1;      // stage through pinned host memory before the H2D copy
     uint64_t budget_bytes = 0;    // per-device VRAM ceiling for slots (0 = auto)
+    uint64_t reserve_bytes = 0;   // free VRAM retained even with an explicit arena budget
     int      hard_max_slots = 8;
+    std::vector<uint64_t> device_budget_bytes; // CUDA ordinal -> total allocation budget; 0 = baseline slot size
 
     void set_budget_mib(uint32_t mib) { budget_bytes = uint64_t(mib) << 20; }
 

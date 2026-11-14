@@ -51,8 +51,14 @@ struct source_traits {
 // Empty string means eligible; otherwise returns the first failed predicate.
 const char * source_rejection(const source_traits & src, int max_devices);
 
-// Auto leaves reserve bytes; explicit budgets are capped by observed free memory.
-uint64_t arena_budget(uint64_t requested_bytes, uint64_t free_bytes, uint64_t reserve_bytes);
+// Explicit budgets also retain minimum_reserve_bytes for graph growth and runtime scratch.
+uint64_t arena_budget(uint64_t requested_bytes, uint64_t free_bytes, uint64_t reserve_bytes,
+                      uint64_t minimum_reserve_bytes = 0);
+
+// Largest aligned payload for each of n_slots within a physical allocation budget.
+// Returns zero for invalid geometry or when the original image cannot fit with allocation padding.
+uint64_t arena_slot_payload(uint64_t budget_bytes, uint64_t min_slot_bytes, int n_slots,
+                            uint64_t slot_overhead_bytes, uint64_t alignment = 512);
 
 struct result {
     bool     enabled        = false;
@@ -136,6 +142,11 @@ struct cache_plan {
 // Includes one permanent zero slot per layer. Scratch is carved from each extent's payload.
 cache_plan plan_cache(const std::vector<cache_layer> & layers, const std::vector<uint64_t> & extents,
                       int slots_per_layer, uint64_t scratch_per_extent, uint64_t alignment = 512);
+
+// Largest capacity whose complete banks fit these device-local extents. The upper bound is
+// clamped to 511; never select fewer slots than the caller's baseline capacity.
+cache_plan fit_cache(const std::vector<cache_layer> & layers, const std::vector<uint64_t> & extents,
+                     int min_slots, int max_slots, uint64_t scratch_per_extent, uint64_t alignment = 512);
 
 // Admission uses integer scores so ties and decay are reproducible across backends.
 bool cache_admit(uint32_t candidate, uint32_t victim, bool free_slot);

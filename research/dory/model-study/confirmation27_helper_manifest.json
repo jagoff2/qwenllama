@@ -1,0 +1,19 @@
+{
+  "frozen_at_utc": "2026-11-13T18:31:45.902979+00:00",
+  "purpose": "Additional provenance before held-out inference; no experimental changes",
+  "design_sha256": "026e6d56b4d5b6e3dc3213bc1578ff455d26a3489c76b100994c5b1e8e583467",
+  "runtime_manifest_sha256": "3fb45eac127f31fb8cd789bcd48122b669991e7ac0a46c3f137fc87a26da753c",
+  "files": {
+    "direct.py": "4a7766f4ed249583d154011c46060789ca6c208c0d5573b215b408cd0ec8f8b9",
+    "evaluate.py": "c3fa63265b641f5735d904451b7998203c52b7c5e6c9f7f226809752014632b8",
+    "explore.py": "d9abedbb49c15f0a7e7aff3af6af8a548cd8b1248c7bc8cd878356de600b018b",
+    "integer_eval.py": "c69b141615f513d4a740088017a0104b5cf04657eddbcf6bb87515a6bc514967",
+    "integer_tasks.py": "d749828e605580c266c2c45e65afda9da16e2f412010c1b08eee548cc8550854",
+    "math_tasks.py": "957adc316406695fde16296a7e1a43bb9a021f7f223c71cc8d8c1997d91d4bb0",
+    "paired_generation.py": "483659c703080b27ff00a5e437b7dae4ff87b9791f2399f8f6d7b4fa5ede2764",
+    "tasks.py": "2334ebf7a2dcd8e056b45a2722454d9d4ec641097357c72cfd0f03bf950c5b04"
+  },
+  "python": "3.10.11 (tags/v3.10.11:7d4cc5a, Apr  5 2023, 00:38:17) [MSC v.1929 64 bit (AMD64)]",
+  "python_executable": "C:\\Users\\user\\AppData\\Local\\Programs\\Python\\Python31011\\python.exe",
+  "platform": "Windows-10-10.0.19045-SP0"
+}

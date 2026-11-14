@@ -368,6 +368,8 @@ private:
     bool moe_cache_need_reserve = true;
     bool moe_decode_layout = false;
     bool moe_phase_failed = false;
+    uint64_t moe_decode_reserve_bytes = 0;
+    std::vector<uint64_t> moe_decode_device_budgets;
     bool moe_cache_observe = false;
     llama_decode_purpose decode_purpose = LLAMA_DECODE_AUTO;
 

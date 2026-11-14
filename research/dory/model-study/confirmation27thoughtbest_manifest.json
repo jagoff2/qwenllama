@@ -1,0 +1,17 @@
+{
+  "kind": "thought_best",
+  "thought_budget": 4,
+  "count": 192,
+  "tasks_sha256": "fbe5b0f3071b26decc788c8b4b3b3059ac43484400e77f675befbf6e1103e13f",
+  "binary_sha256": "e47e7cf41fbc93f876b0bcfc71ba2b36218b77ce32ce9f8e08b6da48b35f1bb4",
+  "llama_sha256": "eed12efe1ca3a6692c820820f5db70466cb9be4c5ada7e0094beb545ad8dfca9",
+  "runner_sha256": "cb0b37bb1e6ffde1711c7edd615422fcd1f63289a690964c60d609a305668860",
+  "control_design_sha256": "f72eb0e953efd6e4b1cbe361157ef2c3c2402510e77cac34cefbecc4bfee1ea7",
+  "fusion": false,
+  "graphs": false,
+  "graph_reuse": false,
+  "fresh_context": true,
+  "warmup": "one unscored easy product",
+  "timing_comparison": "separate run; not randomized interleaved with primary arms",
+  "no_candidate_changes": true
+}

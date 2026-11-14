@@ -1,0 +1,6 @@
+{
+  "original_exit_code": 3221225477,
+  "fixed_exit_code": 0,
+  "test": "failed reservation, identical-shape retry, then recovery",
+  "original_failure": "Windows access violation 0xC0000005"
+}

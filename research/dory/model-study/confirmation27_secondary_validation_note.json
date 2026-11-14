@@ -1,0 +1,15 @@
+{
+  "scope": "Secondary validation revision after inspecting completed external controls; primary scorer unchanged",
+  "observed_case": "heldout-integer_product-n5-0067",
+  "condition": "thought_best",
+  "thought_budget": 4,
+  "final_token_budget": 32,
+  "generated_token_count": 32,
+  "stopped_eog": false,
+  "correct": false,
+  "decision": "Retain this capped incorrect answer in the full 192-case denominator; report final EOG and cap counts. No rerun, exclusion, or change to exact-answer scoring. Original and fused controls still require EOG.",
+  "initial_validation_failure": "Secondary analysis initially required EOG for every external condition and aborted before writing any report.",
+  "primary_scorer_sha256": "ff63216cfed6b4cdbd5f7bd87d7e115a127a6a65f5de61e903d2428e733910a8",
+  "initial_secondary_scorer_sha256": "a0c89bff9c5c0c7ce1b67fc3c43bcc6a66b14f63205bc6cd49d4f35d165e1f49",
+  "revised_secondary_scorer_sha256": "d2941ea09360f39e395fde5c4adea056719161c68e8ba1fe44544364a38c7dfd"
+}

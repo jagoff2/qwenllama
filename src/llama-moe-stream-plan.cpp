@@ -83,6 +83,26 @@ cache_plan plan_cache(const std::vector<cache_layer> & layers, const std::vector
     return out;
 }
 
+cache_plan fit_cache(const std::vector<cache_layer> & layers, const std::vector<uint64_t> & extents,
+                     int min_slots, int max_slots, uint64_t scratch_per_extent, uint64_t alignment) {
+    max_slots = std::min(max_slots, 511);
+    if (min_slots < 1 || min_slots > max_slots) {
+        cache_plan out;
+        out.reason = "invalid cache capacity range";
+        return out;
+    }
+
+    // The greedy whole-bank packing is not assumed to be monotonic as bank sizes change.
+    // The bounded descending scan finds the largest capacity accepted by the same planner.
+    for (int slots = max_slots; slots >= min_slots; --slots) {
+        auto candidate = plan_cache(layers, extents, slots, scratch_per_extent, alignment);
+        if (candidate.enabled || slots == min_slots) {
+            return candidate;
+        }
+    }
+    return {};
+}
+
 bool cache_admit(uint32_t candidate, uint32_t victim, bool free_slot) {
     if (candidate < 2) {
         return false;
@@ -107,9 +127,24 @@ const char * source_rejection(const source_traits & s, int max_devices) {
     return "nonhost_expert_source";
 }
 
-uint64_t arena_budget(uint64_t requested_bytes, uint64_t free_bytes, uint64_t reserve_bytes) {
-    return requested_bytes ? std::min(requested_bytes, free_bytes)
-                           : (free_bytes > reserve_bytes ? free_bytes - reserve_bytes : 0);
+uint64_t arena_budget(uint64_t requested_bytes, uint64_t free_bytes, uint64_t reserve_bytes,
+                      uint64_t minimum_reserve_bytes) {
+    const uint64_t reserve = requested_bytes ? minimum_reserve_bytes : std::max(reserve_bytes, minimum_reserve_bytes);
+    const uint64_t available = free_bytes > reserve ? free_bytes - reserve : 0;
+    return requested_bytes ? std::min(requested_bytes, available) : available;
+}
+
+uint64_t arena_slot_payload(uint64_t budget_bytes, uint64_t min_slot_bytes, int n_slots,
+                            uint64_t slot_overhead_bytes, uint64_t alignment) {
+    if (!min_slot_bytes || n_slots < 1 || !alignment || (alignment & (alignment - 1))) {
+        return 0;
+    }
+    const uint64_t allocation_bytes = budget_bytes / uint64_t(n_slots);
+    if (allocation_bytes <= slot_overhead_bytes) {
+        return 0;
+    }
+    const uint64_t payload = (allocation_bytes - slot_overhead_bytes) & ~(alignment - 1);
+    return payload >= min_slot_bytes ? payload : 0;
 }
 
 int clamp_slots(uint64_t slot_bytes, uint64_t budget_bytes, int want, int hard_max) {

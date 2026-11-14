@@ -1721,7 +1721,10 @@ static bool ggml_backend_sched_alloc_splits(ggml_backend_sched_t sched) {
             ggml_backend_synchronize(sched->backends[i]);
         }
 
-        ggml_gallocr_reserve_n(sched->galloc, &sched->graph, sched->node_backend_ids, sched->leaf_backend_ids);
+        if (!ggml_gallocr_reserve_n(sched->galloc, &sched->graph, sched->node_backend_ids, sched->leaf_backend_ids)) {
+            GGML_LOG_ERROR("%s: failed to reserve graph buffers\n", __func__);
+            return false;
+        }
         if (!ggml_gallocr_alloc_graph(sched->galloc, &sched->graph)) {
             GGML_LOG_ERROR("%s: failed to allocate graph\n", __func__);
             return false;
@@ -1773,6 +1776,22 @@ static enum ggml_status ggml_backend_sched_compute_splits(ggml_backend_sched_t s
     const char * serial_env = getenv("GGML_SCHED_SERIAL_CACHE_PREP");
     const bool serial_prep = serial_env && atoi(serial_env) != 0;
     struct ggml_backend_sched_split * splits = sched->splits;
+
+    // Recurrent visits can route the same expert bank to different expert IDs.
+    // A shared copy must include every visit, not only the first router's subset.
+    std::unordered_map<const ggml_tensor *, const ggml_tensor *> moe_weight_ids;
+    for (int split_id = 0; split_id < sched->n_splits; split_id++) {
+        const struct ggml_cgraph & graph = splits[split_id].graph;
+        for (int node_id = 0; node_id < graph.n_nodes; node_id++) {
+            const ggml_tensor * node = graph.nodes[node_id];
+            if (node->op == GGML_OP_MUL_MAT_ID) {
+                auto entry = moe_weight_ids.emplace(node->src[0], node->src[2]);
+                if (!entry.second && entry.first->second != node->src[2]) {
+                    entry.first->second = nullptr;
+                }
+            }
+        }
+    }
 
     ggml_tensor * prev_ids_tensor = nullptr;
     std::vector<int32_t> ids;
@@ -1842,7 +1861,8 @@ static enum ggml_status ggml_backend_sched_compute_splits(ggml_backend_sched_t s
                 if (split->graph.n_nodes > 0 &&
                     ggml_backend_buffer_get_usage(input->buffer) == GGML_BACKEND_BUFFER_USAGE_WEIGHTS &&
                     ggml_backend_buffer_is_host(input->buffer) && (
-                    (node->src[0] == input_cpy && node->op == GGML_OP_MUL_MAT_ID)
+                    (node->src[0] == input_cpy && node->op == GGML_OP_MUL_MAT_ID &&
+                     moe_weight_ids.at(input_cpy) == node->src[2])
                     //|| (node->src[1] == input_cpy && node->op == GGML_OP_ADD_ID) /* GGML_OP_ADD_ID weights are small and not worth splitting */
                     )) {
 

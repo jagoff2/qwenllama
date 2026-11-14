@@ -1,0 +1,17 @@
+{
+  "task_selection": "every sixth case of replication22 in original generator order",
+  "count": 16,
+  "original_prompt_thought_budgets": [
+    0,
+    2,
+    4,
+    8
+  ],
+  "compact_prompt_long_thought_budgets": [
+    256
+  ],
+  "short_budget_selection_rule": "Choose the largest positive thought budget whose mean measured latency is no greater than loop mean on the same cases; if none fits, use the smallest positive budget and disclose its excess cost. Report every budget, including the 0-token transition control.",
+  "purpose": "stock compute and stronger long-thought development baselines",
+  "warning": "Thought transition is a separate decode; 0-thought condition measures that prompt/decode-boundary effect.",
+  "tasks_sha256": "063a0370b273a98d9d63e61425c9033e396d23e6148561ddbda0954a51b1fdfd"
+}

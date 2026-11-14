@@ -8,6 +8,7 @@
 #include <cinttypes>
 #include <cstring>
 #include <exception>
+#include <fstream>
 #include <stdexcept>
 #include <thread>
 #include <utility>
@@ -620,7 +621,110 @@ llama_model_qwen4exp::graph::graph(const llama_model & model, const llm_graph_pa
             n_embd, hc, n_tokens, 1);
     cb(res_hc, "hc_init", -1);
 
+    int loop_start = -1, loop_end = -1, loop_passes = 1, loop_norm = 0, loop_mode = 0, loop_scope = 0, loop_pin = 0, loop_cache = 0;
+    float loop_alpha = 1.0f, loop_beta = 0.0f, loop_reinject = 0.0f;
+    if (const char * config = getenv("QWEN4EXP_LOOP_CONFIG")) {
+        std::ifstream in(config);
+        if (!(in >> loop_start >> loop_end >> loop_passes >> loop_alpha >> loop_beta >> loop_reinject >> loop_norm)) {
+            throw std::runtime_error("invalid QWEN4EXP_LOOP_CONFIG");
+        }
+        in >> std::ws;
+        if (!in.eof() && !(in >> loop_mode)) {
+            throw std::runtime_error("invalid Qwen loop mode");
+        }
+        in >> std::ws;
+        if (!in.eof() && !(in >> loop_scope)) {
+            throw std::runtime_error("invalid Qwen loop scope");
+        }
+        in >> std::ws;
+        if (!in.eof() && !(in >> loop_pin)) {
+            throw std::runtime_error("invalid Qwen loop expert pin");
+        }
+        in >> std::ws;
+        if (!in.eof() && !(in >> loop_cache)) {
+            throw std::runtime_error("invalid Qwen loop cache policy");
+        }
+        if (loop_cache < 0 || loop_cache > 1) {
+            throw std::runtime_error("Qwen loop cache policy must be 0 (last) or 1 (first)");
+        }
+        if (loop_pin < 0 || loop_pin > 2) {
+            throw std::runtime_error("Qwen loop expert pin must be 0, 1 (IDs), or 2 (IDs and mixture)");
+        }
+        if (loop_mode < 0 || loop_mode > 3 || loop_scope < 0 || loop_scope > 3) {
+            throw std::runtime_error("Qwen loop mode/scope must be in 0..3");
+        }
+        if (loop_passes < 1 || loop_passes > 8 || (loop_passes > 1 &&
+                (loop_start < 2 || loop_end < loop_start || loop_end >= n_layer - 1))) {
+            throw std::runtime_error("invalid Qwen loop range or pass count");
+        }
+    }
+    // Scope 1 refines only the last token of this single-sequence microbatch.
+    // Scope 2 loops single-token decode only; scope 3 loops multi-token prefill only.
+    // These experimental scopes are intentionally restricted to one sequence.
+    if (loop_scope != 0 && loop_passes > 1 && ubatch.n_seqs != 1) {
+        throw std::runtime_error("scoped Qwen recurrence requires one sequence");
+    }
+    if ((loop_scope == 2 && n_tokens > 1) || (loop_scope == 3 && n_tokens == 1)) {
+        loop_passes = 1;
+    }
+    if (loop_cache && loop_passes > 1 && (ubatch.n_seqs != 1 || cparams.n_rs_seq != 0)) {
+        throw std::runtime_error("first-pass cache experiments require one sequence and no rollback slots");
+    }
+    const bool loop_per_layer = loop_mode == 1 || loop_mode == 2;
+    const bool loop_refine_update = loop_mode >= 2;
+    auto loop_keep_prefix = [&](ggml_tensor * current, ggml_tensor * reference) {
+        if (loop_scope != 1 || n_tokens == 1) {
+            return current;
+        }
+        ggml_tensor * prefix = ggml_view_3d(ctx0, reference, n_embd, hc, n_tokens - 1,
+                reference->nb[1], reference->nb[2], 0);
+        ggml_tensor * last = ggml_view_3d(ctx0, current, n_embd, hc, 1,
+                current->nb[1], current->nb[2], (n_tokens - 1) * current->nb[2]);
+        return ggml_concat(ctx0, prefix, last, 2);
+    };
+    int loop_pass = 0;
+    ggml_tensor * loop_input = nullptr;
+    ggml_tensor * loop_origin = nullptr;
+    ggml_tensor * loop_anchor = nullptr;
+    std::vector<ggml_tensor *> loop_expert_ids(n_layer, nullptr);
+    std::vector<ggml_tensor *> loop_router_logits(n_layer, nullptr);
+
+    // Every pass must write its own current K/V before attention reads it. Retain
+    // the first write payloads, then replay them after all final-pass consumers.
+    // This also restores convolution and gated-delta state without changing the
+    // original-history snapshots in rs_rows. The default path adds no nodes.
+    struct loop_cache_write {
+        ggml_op op;
+        ggml_tensor * values;
+        ggml_tensor * destination;
+        ggml_tensor * indices;
+    };
+    std::vector<loop_cache_write> loop_first_writes;
+    auto storage_root = [](ggml_tensor * t) {
+        while (t && t->view_src) {
+            t = t->view_src;
+        }
+        return t;
+    };
+
     for (int il = 0; il < n_layer; ++il) {
+        const bool in_loop = loop_passes > 1 && il >= loop_start && il <= loop_end;
+        const int cache_node_begin = loop_cache && in_loop && loop_pass == 0 ? ggml_graph_n_nodes(gf) : -1;
+        if (in_loop && (loop_per_layer || il == loop_start)) {
+            if (loop_pass == 0) {
+                loop_origin = res_hc;
+            } else if (loop_reinject != 0.0f) {
+                res_hc = ggml_add(ctx0, res_hc, ggml_scale(ctx0, loop_origin, loop_reinject));
+            }
+            if (loop_pass > 0 && loop_norm >= 2) {
+                ggml_tensor * magnitude = ggml_sqrt(ctx0, ggml_mean(ctx0, ggml_sqr(ctx0, loop_origin)));
+                res_hc = ggml_mul(ctx0, ggml_rms_norm(ctx0, res_hc, hparams.f_norm_rms_eps), magnitude);
+            }
+            if (loop_pass > 0) {
+                res_hc = loop_keep_prefix(res_hc, loop_origin);
+            }
+            loop_input = res_hc;
+        }
         res->t_layer_inp[il] = res_hc;
 
         if (hparams.is_ple(il)) {
@@ -664,13 +768,103 @@ llama_model_qwen4exp::graph::graph(const llama_model & model, const llm_graph_pa
                 model.layers[il].hc_ffn_inject,
                 &inject, il);
 
-        cur = build_layer_ffn(cur, il);
+        cur = build_layer_ffn(cur, il, in_loop && loop_pin ? &loop_expert_ids[il] : nullptr,
+                in_loop && loop_pin == 2 ? &loop_router_logits[il] : nullptr);
         cb(cur, "ffn_out", il);
 
         res_hc = build_hc_combine(res_hc, cur, inject, il);
 
         // "l_last" is the layer output name that build_cvec and imatrix look for
         cb(res_hc, "l_last", il);
+
+        if (cache_node_begin >= 0) {
+            std::vector<ggml_tensor *> cache_roots;
+            auto add_root = [&](ggml_tensor * t) {
+                if (t) {
+                    cache_roots.push_back(storage_root(t));
+                }
+            };
+            if (hparams.is_recr(il)) {
+                const auto * recurrent = inp->mctx->get_recr();
+                add_root(recurrent->get_r_l(il));
+                add_root(recurrent->get_s_l(il));
+                if (hparams.is_ple(il)) {
+                    add_root(recurrent->get_p_l(il));
+                }
+            } else {
+                add_root(inp->mctx->get_attn()->get_k(ctx0, il));
+                add_root(inp->mctx->get_attn()->get_v(ctx0, il));
+                if (mctx_idx && hparams.dsv4_compress_ratios[il] > 0) {
+                    add_root(mctx_idx->get_k(ctx0, il));
+                }
+            }
+            std::vector<ggml_tensor *> found_roots;
+            const int cache_node_end = ggml_graph_n_nodes(gf);
+            for (int ni = cache_node_begin; ni < cache_node_end; ++ni) {
+                ggml_tensor * node = ggml_graph_node(gf, ni);
+                ggml_tensor * dst = node->op == GGML_OP_CPY ? node->src[1] :
+                                   node->op == GGML_OP_SET_ROWS ? node->src[2] : nullptr;
+                ggml_tensor * root = storage_root(dst);
+                if (!dst || std::find(cache_roots.begin(), cache_roots.end(), root) == cache_roots.end()) {
+                    continue;
+                }
+                ggml_tensor * values = node->src[0];
+                if (std::find(cache_roots.begin(), cache_roots.end(), storage_root(values)) != cache_roots.end()) {
+                    values = ggml_cont(ctx0, values);
+                    ggml_build_forward_expand(gf, values);
+                }
+                loop_first_writes.push_back({node->op, values, dst,
+                        node->op == GGML_OP_SET_ROWS ? node->src[1] : nullptr});
+                found_roots.push_back(root);
+            }
+            for (ggml_tensor * root : cache_roots) {
+                if (std::find(found_roots.begin(), found_roots.end(), root) == found_roots.end()) {
+                    throw std::runtime_error("first-pass cache journal missed a persistent cache");
+                }
+            }
+        }
+
+        if (in_loop && (loop_per_layer || il == loop_end)) {
+            if (loop_pass == 0) {
+                loop_anchor = res_hc;
+            }
+            if (loop_refine_update && loop_pass > 0) {
+                // Refine the residual update around the fixed original input:
+                // Y <- (1-alpha)*Y + alpha*(X + F(Y) - Y).
+                // The first pass is the native F(X), without damping.
+                ggml_tensor * proposal = ggml_add(ctx0, loop_origin, ggml_sub(ctx0, res_hc, loop_input));
+                res_hc = ggml_add(ctx0, loop_input,
+                        ggml_scale(ctx0, ggml_sub(ctx0, proposal, loop_input), loop_alpha));
+            } else if (!loop_refine_update && loop_alpha != 1.0f) {
+                res_hc = ggml_add(ctx0, loop_input,
+                        ggml_scale(ctx0, ggml_sub(ctx0, res_hc, loop_input), loop_alpha));
+            }
+            if (loop_norm) {
+                ggml_tensor * magnitude = ggml_sqrt(ctx0, ggml_mean(ctx0, ggml_sqr(ctx0, loop_anchor)));
+                res_hc = ggml_mul(ctx0, ggml_rms_norm(ctx0, res_hc, hparams.f_norm_rms_eps), magnitude);
+            }
+            if (++loop_pass < loop_passes) {
+                il = loop_per_layer ? il - 1 : loop_start - 1;
+            } else {
+                if (loop_cache) {
+                    ggml_build_forward_expand(gf, res_hc);
+                    for (const auto & write : loop_first_writes) {
+                        ggml_tensor * restored = write.op == GGML_OP_CPY ?
+                            ggml_cpy(ctx0, write.values, write.destination) :
+                            ggml_set_rows(ctx0, write.destination, write.values, write.indices);
+                        ggml_format_name(restored, "loop_cache_restore_%d", il);
+                        ggml_build_forward_expand(gf, restored);
+                    }
+                    loop_first_writes.clear();
+                }
+                if (loop_beta != 0.0f) {
+                    res_hc = ggml_add(ctx0, ggml_scale(ctx0, loop_anchor, loop_beta),
+                            ggml_scale(ctx0, res_hc, 1.0f - loop_beta));
+                }
+                res_hc = loop_keep_prefix(res_hc, loop_anchor);
+                loop_pass = 0;
+            }
+        }
     }
 
     // hand the drafter the 4-stream residual, pre-collapse: nextn.hnorm is hc-space
@@ -1368,7 +1562,12 @@ ggml_tensor * llama_model_qwen4exp::graph::build_layer_attn_linear(
     ggml_tensor * conv_input = build_conv_state_at(inp, conv_states_all, qkv_mixed,
             conv_kernel_size - 1, conv_channels, il);
 
-    ggml_tensor * state = build_rs(inp, ssm_states_all, hparams.n_embd_s(), n_seqs);
+    // Repeated depth passes read the same temporal state; only the final write survives.
+    auto state_it = rs_rows.find(ssm_states_all);
+    if (state_it == rs_rows.end()) {
+        state_it = rs_rows.emplace(ssm_states_all, build_rs(inp, ssm_states_all, hparams.n_embd_s(), n_seqs)).first;
+    }
+    ggml_tensor * state = state_it->second;
     state = ggml_reshape_4d(ctx0, state, head_v_dim, head_v_dim, num_v_heads, n_seqs);
     cb(state, "state_predelta", il);
 
@@ -1440,8 +1639,22 @@ ggml_tensor * llama_model_qwen4exp::graph::build_layer_attn_linear(
     return cur;
 }
 
-ggml_tensor * llama_model_qwen4exp::graph::build_layer_ffn(ggml_tensor * cur, const int il) {
+ggml_tensor * llama_model_qwen4exp::graph::build_layer_ffn(ggml_tensor * cur, const int il,
+        ggml_tensor ** pinned_experts, ggml_tensor ** pinned_logits) {
     GGML_ASSERT(model.layers[il].ffn_gate_inp != nullptr);
+
+    // Optional first-pass routed expert identities, with either current-input
+    // or frozen mixture weights. The shared expert gate remains input-dependent.
+    // Without pinning the native graph is unchanged.
+    ggml_tensor * router_logits = pinned_logits ? *pinned_logits : nullptr;
+    if (pinned_experts && !*pinned_experts) {
+        router_logits = build_lora_mm(model.layers[il].ffn_gate_inp, cur);
+        cb(router_logits, "ffn_moe_logits", il);
+        *pinned_experts = ggml_argsort_top_k(ctx0, ggml_soft_max(ctx0, router_logits), n_expert_used);
+        if (pinned_logits) {
+            *pinned_logits = router_logits;
+        }
+    }
 
     ggml_tensor * moe_out =
         build_moe_ffn(cur,
@@ -1454,10 +1667,11 @@ ggml_tensor * llama_model_qwen4exp::graph::build_layer_ffn(ggml_tensor * cur, co
             LLM_FFN_SILU, true,
             hparams.expert_weights_scale,
             LLAMA_EXPERT_GATING_FUNC_TYPE_SOFTMAX, il,
-            nullptr, model.layers[il].ffn_gate_up_exps,
+            router_logits, model.layers[il].ffn_gate_up_exps,
             model.layers[il].ffn_up_exps_s,
             model.layers[il].ffn_gate_exps_s,
-            model.layers[il].ffn_down_exps_s);
+            model.layers[il].ffn_down_exps_s,
+            pinned_experts ? *pinned_experts : nullptr);
     cb(moe_out, "ffn_moe_out", il);
 
     // shared experts, as in the Qwen3Next reference

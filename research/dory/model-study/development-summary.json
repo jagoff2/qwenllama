@@ -1,0 +1,181 @@
+{
+  "scope": "Exploratory development comparisons; unadjusted for configuration selection.",
+  "results": [
+    {
+      "experiment": "Wide Dory-style block",
+      "artifact": "free7_dory24_39x3.jsonl",
+      "stock": "3/48",
+      "candidate": "7/48",
+      "wins_losses": "5 / 1",
+      "paired_p": "0.21875"
+    },
+    {
+      "experiment": "Nine-digit product band",
+      "artifact": "band10_dory24_39x3.jsonl",
+      "stock": "42/96",
+      "candidate": "21/96",
+      "wins_losses": "4 / 25",
+      "paired_p": "0.000103716"
+    },
+    {
+      "experiment": "Nine-digit product band",
+      "artifact": "band10_layer24_39_euler2.jsonl",
+      "stock": "42/96",
+      "candidate": "42/96",
+      "wins_losses": "7 / 7",
+      "paired_p": "1"
+    },
+    {
+      "experiment": "Narrow raw / damped loops",
+      "artifact": "free14_block28_31_raw2.jsonl",
+      "stock": "3/48",
+      "candidate": "8/48",
+      "wins_losses": "5 / 0",
+      "paired_p": "0.0625"
+    },
+    {
+      "experiment": "Narrow raw / damped loops",
+      "artifact": "free14_block20_23_euler2.jsonl",
+      "stock": "3/48",
+      "candidate": "6/48",
+      "wins_losses": "3 / 0",
+      "paired_p": "0.25"
+    },
+    {
+      "experiment": "Narrow raw / damped loops",
+      "artifact": "free14_layer20_35_euler4.jsonl",
+      "stock": "3/48",
+      "candidate": "7/48",
+      "wins_losses": "5 / 1",
+      "paired_p": "0.21875"
+    },
+    {
+      "experiment": "Normalized three passes",
+      "artifact": "norm15_norm28_31x3.jsonl",
+      "stock": "3/48",
+      "candidate": "9/48",
+      "wins_losses": "7 / 1",
+      "paired_p": "0.0703125"
+    },
+    {
+      "experiment": "Normalized follow-up",
+      "artifact": "free18_norm28_31x4.jsonl",
+      "stock": "3/48",
+      "candidate": "12/48",
+      "wins_losses": "10 / 1",
+      "paired_p": "0.0117188"
+    },
+    {
+      "experiment": "Normalized follow-up",
+      "artifact": "free18_norm28_31x6.jsonl",
+      "stock": "3/48",
+      "candidate": "10/48",
+      "wins_losses": "8 / 1",
+      "paired_p": "0.0390625"
+    },
+    {
+      "experiment": "Normalized follow-up",
+      "artifact": "free18_norm28_31x3_pin2.jsonl",
+      "stock": "3/48",
+      "candidate": "10/48",
+      "wins_losses": "8 / 1",
+      "paired_p": "0.0390625"
+    },
+    {
+      "experiment": "Exact sums",
+      "artifact": "sum18_norm28_31x3.jsonl",
+      "stock": "14/32",
+      "candidate": "16/32",
+      "wins_losses": "3 / 1",
+      "paired_p": "0.625"
+    },
+    {
+      "experiment": "Exact sums",
+      "artifact": "sum18_raw28_31x2.jsonl",
+      "stock": "14/32",
+      "candidate": "15/32",
+      "wins_losses": "2 / 1",
+      "paired_p": "1"
+    },
+    {
+      "experiment": "Position schedule",
+      "artifact": "schedule21free_base4_stock6_late6.jsonl",
+      "stock": "3/48",
+      "candidate": "11/48",
+      "wins_losses": "9 / 1",
+      "paired_p": "0.0214844"
+    },
+    {
+      "experiment": "Amplification / first cache",
+      "artifact": "amplify22_norm28_31x4_a125.jsonl",
+      "stock": "3/48",
+      "candidate": "10/48",
+      "wins_losses": "8 / 1",
+      "paired_p": "0.0390625"
+    },
+    {
+      "experiment": "Amplification / first cache",
+      "artifact": "amplify22_norm28_31x6_first.jsonl",
+      "stock": "3/48",
+      "candidate": "12/48",
+      "wins_losses": "10 / 1",
+      "paired_p": "0.0117188"
+    },
+    {
+      "experiment": "Digit diagnostic",
+      "artifact": "digit19_norm28_31x4.jsonl",
+      "stock": "4/40",
+      "candidate": "5/40",
+      "wins_losses": "3 / 2",
+      "paired_p": "1"
+    },
+    {
+      "experiment": "Digit diagnostic",
+      "artifact": "digit19_norm28_31x6_first.jsonl",
+      "stock": "4/40",
+      "candidate": "5/40",
+      "wins_losses": "3 / 2",
+      "paired_p": "1"
+    },
+    {
+      "experiment": "96-token thoughts, compact prompt",
+      "artifact": "thinking16_norm28_31x3_thought96.jsonl",
+      "stock": "1/8",
+      "candidate": "0/8",
+      "wins_losses": "0 / 1",
+      "paired_p": "1"
+    },
+    {
+      "experiment": "96-token thoughts, compact prompt",
+      "artifact": "thinking16_raw28_31x2_thought96.jsonl",
+      "stock": "1/8",
+      "candidate": "0/8",
+      "wins_losses": "0 / 1",
+      "paired_p": "1"
+    },
+    {
+      "experiment": "Fresh replication",
+      "artifact": "replication22_norm28_31x4.jsonl",
+      "stock": "22/96",
+      "candidate": "44/96",
+      "wins_losses": "25 / 3",
+      "paired_p": "2.74405e-05"
+    },
+    {
+      "experiment": "Fresh replication, fused original",
+      "artifact": "replication22_norm28_31x4.jsonl",
+      "stock": "23/96",
+      "candidate": "44/96",
+      "wins_losses": "24 / 3",
+      "paired_p": "4.92334e-05"
+    },
+    {
+      "experiment": "Basic canaries",
+      "artifact": "regression26_norm28_31x4.jsonl",
+      "stock": "40/40",
+      "candidate": "40/40",
+      "wins_losses": "0 / 0",
+      "paired_p": "1"
+    }
+  ]
+}

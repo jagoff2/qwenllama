@@ -280,6 +280,16 @@ llama_context::llama_context(
     if (cparams.moe_decode_cache && (!cparams.moe_stream_enable || cparams.n_seq_max != 1)) {
         throw std::runtime_error("--fn-decode-expert-cache requires --fn-stream-experts and one sequence");
     }
+    if (cparams.moe_decode_cache) {
+        if (const char * value = std::getenv("LLAMA_MOE_CACHE_RESERVE_MIB")) {
+            char * end = nullptr;
+            const long mib = std::strtol(value, &end, 10);
+            if (end == value || *end != '\0' || mib < 128 || mib > 16384) {
+                throw std::runtime_error("LLAMA_MOE_CACHE_RESERVE_MIB must be between 128 and 16384");
+            }
+            moe_decode_reserve_bytes = uint64_t(mib) << 20;
+        }
+    }
     cparams.moe_stream_slots      = params.moe_stream_slots      == 0 ? 3 : params.moe_stream_slots;
     cparams.moe_stream_min_tokens = params.moe_stream_min_tokens == 0 ? 1 : params.moe_stream_min_tokens;
     cparams.moe_stream_pin        = params.moe_stream_pin;
@@ -1383,9 +1393,33 @@ const llama_moe_stream * llama_context::moe_stream_update(const int64_t n_tokens
         sp.place_mode   = cparams.moe_stream_gpu_mode;
         sp.place_device = cparams.moe_stream_arena_device;
         sp.place_w      = cparams.moe_stream_split;
+        if (!moe_decode_layout) {
+            if (const char * value = std::getenv("LLAMA_MOE_STREAM_RESERVE_MIB")) {
+                char * end = nullptr;
+                const long mib = std::strtol(value, &end, 10);
+                if (end == value || *end != '\0' || mib < 0 || mib > 16384) {
+                    throw std::runtime_error("LLAMA_MOE_STREAM_RESERVE_MIB must be between 0 and 16384");
+                }
+                sp.reserve_bytes = uint64_t(mib) << 20;
+            }
+        }
         if (moe_decode_layout) {
             sp.n_slots = 2;
             sp.set_budget_mib(4096);
+            if (const char * value = std::getenv("LLAMA_MOE_CACHE_DECODE_BOOTSTRAP_MIB")) {
+                char * end = nullptr;
+                const long mib = std::strtol(value, &end, 10);
+                if (end == value || *end != '\0' || mib < 2048 || mib > 16384) {
+                    throw std::runtime_error("LLAMA_MOE_CACHE_DECODE_BOOTSTRAP_MIB must be between 2048 and 16384");
+                }
+                sp.set_budget_mib((uint64_t) mib);
+                // Keep the same ring width when the measured budget grows.
+                // Decode consumes cache banks, not streamed-prefill lookahead.
+                if (mib < 4096) {
+                    sp.n_slots = 1;
+                }
+            }
+            sp.device_budget_bytes = moe_decode_device_budgets;
             sp.place_mode = 0;
             sp.place_device = -1;
             sp.place_w.clear();
@@ -1422,7 +1456,16 @@ const llama_moe_stream * llama_context::moe_stream_update(const int64_t n_tokens
         }
         if (moe_decode_layout) {
             params.slots_per_layer = 44;
+            if (const char * value = std::getenv("LLAMA_MOE_CACHE_DECODE_BOOTSTRAP_SLOTS")) {
+                char * end = nullptr;
+                const long slots = std::strtol(value, &end, 10);
+                if (end == value || *end != '\0' || slots < 1 || slots > 511) {
+                    throw std::runtime_error("LLAMA_MOE_CACHE_DECODE_BOOTSTRAP_SLOTS must be between 1 and 511");
+                }
+                params.slots_per_layer = (int) slots;
+            }
             params.multi_device = true;
+            params.fit_capacity = !moe_decode_device_budgets.empty();
         }
         moe_cache = llama_moe_cache_create(model, moe_stream, params);
         if (!moe_cache) {
@@ -1467,10 +1510,22 @@ llm_graph_result * llama_context::process_ubatch(const llama_ubatch & ubatch, ll
         moe_stream_cur = nullptr;
         moe_cache_cur = nullptr;
         moe_decode_layout = decode;
+        moe_decode_device_budgets.clear();
         moe_stream_failed = false;
         moe_cache_failed = false;
         moe_stream_need_reserve = true;
         moe_cache_need_reserve = true;
+        // Re-establish prefill scratch before choosing expert arena capacity,
+        // just as startup does. Otherwise an unfused/recurrent graph can lose
+        // its scratch space to arenas allocated while the device is empty.
+        if (!decode) {
+            auto full = memory ? memory->init_full() : nullptr;
+            const uint32_t rows = std::min(cparams.n_ctx, cparams.n_ubatch);
+            if ((memory && !full) || !graph_reserve(rows, cparams.n_seq_max,
+                    std::min(rows, cparams.n_outputs_max), full.get())) {
+                throw std::runtime_error("cannot reserve prefill scratch before expert pool transition");
+            }
+        }
     };
     // <=49-row prompt replay fits the reserved decode graph and keeps its hot
     // experts. Larger prompt batches restore the original prefill allocation.
@@ -1522,9 +1577,64 @@ llm_graph_result * llama_context::process_ubatch(const llama_ubatch & ubatch, ll
                 return reserved;
             };
             bool reserved = reserve_cache();
+            if (reserved && moe_decode_layout && moe_decode_reserve_bytes && moe_decode_device_budgets.empty()) {
+                ggml_backend_sched_synchronize(sched.get());
+                std::vector<uint64_t> budgets(LLAMA_MOE_STREAM_MAX_DEVICES, 0);
+                std::vector<ggml_backend_dev_t> devices(LLAMA_MOE_STREAM_MAX_DEVICES, nullptr);
+                for (const auto & extent : moe_stream->extents) {
+                    budgets.at(extent.device) += ggml_backend_buffer_get_size(extent.buffer);
+                    devices.at(extent.device) = ggml_backend_buft_get_device(ggml_backend_buffer_get_type(extent.buffer));
+                }
+                bool grow = false;
+                for (size_t device = 0; device < devices.size(); ++device) {
+                    if (!devices[device]) {
+                        continue;
+                    }
+                    size_t free_bytes = 0, total_bytes = 0;
+                    ggml_backend_dev_memory(devices[device], &free_bytes, &total_bytes);
+                    const uint64_t quantum = uint64_t(64) << 20;
+                    const uint64_t extra = free_bytes > moe_decode_reserve_bytes ?
+                            (free_bytes - moe_decode_reserve_bytes) & ~(quantum - 1) : 0;
+                    budgets[device] += extra;
+                    grow = grow || extra != 0;
+                    LLAMA_LOG_INFO("moe_phase: device %zu full-graph free=%.2f MiB, reserve=%.2f MiB, arena budget=%.2f MiB\n",
+                                   device, free_bytes / 1048576.0, moe_decode_reserve_bytes / 1048576.0,
+                                   budgets[device] / 1048576.0);
+                }
+                if (grow) {
+                    // Measure after full-context reservation, then replace pools without overlapping their lifetimes.
+                    saved_routes = llama_moe_cache_save_prompt(moe_cache);
+                    reset_layout(true);
+                    moe_decode_device_budgets = std::move(budgets);
+                    moe_stream_cur = moe_stream_update(ubatch.n_tokens);
+                    reserved = llama_moe_cache_restore_prompt(moe_cache, saved_routes) && reserve_cache();
+                    if (reserved) {
+                        ggml_backend_sched_synchronize(sched.get());
+                        for (size_t device = 0; device < devices.size(); ++device) {
+                            if (!devices[device]) {
+                                continue;
+                            }
+                            size_t free_bytes = 0, total_bytes = 0;
+                            ggml_backend_dev_memory(devices[device], &free_bytes, &total_bytes);
+                            LLAMA_LOG_INFO("moe_phase: device %zu expanded decode free=%.2f MiB\n", device, free_bytes / 1048576.0);
+                            if (free_bytes < moe_decode_reserve_bytes) {
+                                reserved = false;
+                            }
+                        }
+                    }
+                    if (!reserved) {
+                        LLAMA_LOG_WARN("moe_phase: expanded decode pools did not preserve the reserve; restoring fixed decode pools\n");
+                        reset_layout(true);
+                        moe_stream_cur = moe_stream_update(ubatch.n_tokens);
+                        reserved = llama_moe_cache_restore_prompt(moe_cache, saved_routes) && reserve_cache();
+                    }
+                }
+            }
             if (!reserved && moe_decode_layout) {
                 LLAMA_LOG_WARN("moe_phase: decode graph does not fit; restoring original arena layout\n");
-                saved_routes = llama_moe_cache_save_prompt(moe_cache);
+                if (saved_routes.empty()) {
+                    saved_routes = llama_moe_cache_save_prompt(moe_cache);
+                }
                 reset_layout(false);
                 moe_phase_failed = true;
                 moe_stream_cur = moe_stream_update(ubatch.n_tokens);
@@ -1534,6 +1644,7 @@ llm_graph_result * llama_context::process_ubatch(const llama_ubatch & ubatch, ll
                 reserved = reserve_cache();
             }
             moe_cache_need_reserve = false;
+            moe_cache_observe = moe_cache && !moe_cache_failed && decode_purpose != LLAMA_DECODE_AUTO;
             if (!reserved) {
                 moe_cache_failed = true;
                 moe_cache_observe = false;
